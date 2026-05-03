@@ -104,11 +104,19 @@ func ReplyTicket(ticketId int, scope DataScope, content string) (*model.TicketRe
 		Content:   content,
 	}
 
+	// W03 修复：用 CAS 防止 close-after-read race —
+	// 若另一事务在我们读到 status=open 后已把工单 close，这里的 RowsAffected=0 我们就 rollback。
 	if err := model.DB.Transaction(func(tx *gorm.DB) error {
-		if err := model.CreateTicketReplyTx(tx, reply); err != nil {
-			return err
+		res := tx.Model(&model.Ticket{}).
+			Where("id = ? AND status <> ?", ticket.Id, model.TicketStatusClosed).
+			Update("status", status)
+		if res.Error != nil {
+			return res.Error
 		}
-		if err := model.SetTicketStatus(tx, ticket.Id, status); err != nil {
+		if res.RowsAffected == 0 {
+			return ErrTicketClosed
+		}
+		if err := model.CreateTicketReplyTx(tx, reply); err != nil {
 			return err
 		}
 		return model.SetLastReplyAt(tx, ticket.Id, now)
@@ -153,12 +161,24 @@ func EscalateTicket(ticketId int, scope DataScope, byCustomer bool) error {
 	}
 	message := fmt.Sprintf("Ticket escalated from %s to %s", oldRole, newRole)
 
+	// W03 修复：用 CAS 同时校验 status<>'closed' AND escalate_count=expected，
+	// 防止并发 close 或并发 escalate 突破限频。
 	if err := model.DB.Transaction(func(tx *gorm.DB) error {
-		if err := model.UpdateTicketAssignee(tx, ticket.Id, newRole, newLevel, oldRole, now, true); err != nil {
-			return err
+		res := tx.Model(&model.Ticket{}).
+			Where("id = ? AND status <> ? AND escalate_count = ?", ticket.Id, model.TicketStatusClosed, ticket.EscalateCount).
+			Updates(map[string]interface{}{
+				"assignee_role":  newRole,
+				"assignee_level": newLevel,
+				"escalated_from": oldRole,
+				"escalated_at":   now,
+				"escalate_count": gorm.Expr("escalate_count + 1"),
+				"status":         model.TicketStatusOpen,
+			})
+		if res.Error != nil {
+			return res.Error
 		}
-		if err := model.SetTicketStatus(tx, ticket.Id, model.TicketStatusOpen); err != nil {
-			return err
+		if res.RowsAffected == 0 {
+			return ErrEscalateTooFrequent
 		}
 		if err := model.CreateTicketReplyTx(tx, &model.TicketReply{
 			TicketId:  ticket.Id,
@@ -210,12 +230,22 @@ func AssignTicket(ticketId int, scope DataScope, targetRole string) error {
 	newLevel := ticketAssigneeLevel(targetRole)
 	message := fmt.Sprintf("Reassigned from %s to %s by %s", oldRole, targetRole, scope.ActorRole)
 
+	// W03 修复：CAS on status<>'closed'，防止并发 close 后再 assign。
 	if err := model.DB.Transaction(func(tx *gorm.DB) error {
-		if err := model.UpdateTicketAssignee(tx, ticket.Id, targetRole, newLevel, oldRole, now, false); err != nil {
-			return err
+		res := tx.Model(&model.Ticket{}).
+			Where("id = ? AND status <> ?", ticket.Id, model.TicketStatusClosed).
+			Updates(map[string]interface{}{
+				"assignee_role":  targetRole,
+				"assignee_level": newLevel,
+				"escalated_from": oldRole,
+				"escalated_at":   now,
+				"status":         model.TicketStatusOpen,
+			})
+		if res.Error != nil {
+			return res.Error
 		}
-		if err := model.SetTicketStatus(tx, ticket.Id, model.TicketStatusOpen); err != nil {
-			return err
+		if res.RowsAffected == 0 {
+			return ErrTicketClosed
 		}
 		if err := model.CreateTicketReplyTx(tx, &model.TicketReply{
 			TicketId:  ticket.Id,

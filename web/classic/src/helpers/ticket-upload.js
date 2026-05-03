@@ -79,9 +79,9 @@ export async function uploadAttachment(ticketId, file, replyId = 0) {
     formData.append('reply_id', String(replyId));
   }
 
-  const res = await API.post(`/api/ticket/${ticketId}/attachment`, formData, {
-    headers: { 'Content-Type': 'multipart/form-data' },
-  });
+  // I02 修复：不显式设置 Content-Type — 让 axios/浏览器自动加 multipart boundary。
+  // 显式设置会丢失 boundary，部分浏览器会按字面 multipart/form-data 发，服务端解析失败。
+  const res = await API.post(`/api/ticket/${ticketId}/attachment`, formData);
 
   if (res.data.success) {
     return res.data.data;

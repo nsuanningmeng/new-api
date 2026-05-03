@@ -258,7 +258,8 @@ func DeleteAttachment(c *gin.Context) {
 		return
 	}
 
-	if _, ok := parseIntParam(c, "id"); !ok {
+	ticketId, ok := parseIntParam(c, "id")
+	if !ok {
 		return
 	}
 	attachmentId, ok := parseInt64Param(c, "aid")
@@ -266,7 +267,8 @@ func DeleteAttachment(c *gin.Context) {
 		return
 	}
 
-	if err := service.DeleteTicketAttachment(attachmentId, scope); err != nil {
+	// I01 修复：先校验 attachment 确实属于这个 ticketId（路由一致性 + 防越权）。
+	if err := service.DeleteTicketAttachmentInTicket(ticketId, attachmentId, scope); err != nil {
 		respondTicketError(c, err)
 		return
 	}

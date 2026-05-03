@@ -7,7 +7,6 @@ import (
 	"errors"
 	"fmt"
 	"image"
-	"image/gif"
 	"image/jpeg"
 	"image/png"
 	"io"
@@ -88,86 +87,24 @@ var allowedAttachmentFormats = map[string]struct{}{
 	"webp": {},
 }
 
-// UploadTicketAttachment 串联 10 层防御：
+// UploadTicketAttachment 11 层纵深防御。**关键修复（codex W01/W02/W05/W06）**：
 //
-//	L1 Header.Size 预检 → L2 LimitReader 二次拦截 → L3 magic-byte 嗅探 →
-//	L4 真实解码（含像素总数防炸弹）→ L5 SVG 黑名单 → L6 强制重编码（剥离 EXIF/polyglot 载荷）→
-//	L7 sha256 去重 → L8 文件名 sanitize → L9 单工单/单回复/总量限额 → L10 SysLog 审计。
+//	1. 权限/状态/限额预检在 read+decode 之前（防 IDOR 信息探测 + CPU 浪费）
+//	2. 限额 + dedup 在事务内做最终原子校验（防并发绕过）
+//	3. GIF 不调 DecodeAll（防多帧解码 OOM）
+//	4. 所有 filename 用 %q 转义后再写日志（防 log forging via CRLF）
 func UploadTicketAttachment(input UploadAttachmentInput) (*model.TicketAttachment, error) {
 	limits := DefaultAttachmentLimits
 	if input.TicketId <= 0 || input.File == nil {
 		return nil, ErrAttachmentDecodeFailed
 	}
 
-	// L1: caller-supplied size pre-check
+	// L0: caller-supplied size pre-check（read 之前）
 	if input.Header != nil && input.Header.Size > int64(limits.MaxUploadBytes) {
 		return nil, ErrAttachmentTooLarge
 	}
 
-	// L2: defense-in-depth — read body with hard cap
-	data, err := io.ReadAll(io.LimitReader(input.File, int64(limits.MaxUploadBytes)+1))
-	if err != nil {
-		return nil, err
-	}
-	if len(data) > limits.MaxUploadBytes {
-		return nil, ErrAttachmentTooLarge
-	}
-	if len(data) == 0 {
-		common.SysError(fmt.Sprintf("ticket attachment empty upload: ticket=%d user=%d filename=%s", input.TicketId, input.Scope.ActorUserId, input.Filename))
-		return nil, ErrAttachmentDecodeFailed
-	}
-
-	// L3: MIME magic-byte sniffing (do NOT trust client-declared Content-Type)
-	sniffed := sniffAttachmentMime(data)
-	if sniffed == "image/svg+xml" {
-		// L5: SVG 黑名单（DetectContentType 通常会把 SVG 识别为 text/xml；这里再加一层防御）
-		common.SysError(fmt.Sprintf("ticket attachment rejected svg: ticket=%d user=%d filename=%s", input.TicketId, input.Scope.ActorUserId, input.Filename))
-		return nil, ErrAttachmentMimeNotAllowed
-	}
-	if _, ok := allowedAttachmentMimes[sniffed]; !ok {
-		common.SysError(fmt.Sprintf("ticket attachment mime rejected: ticket=%d user=%d filename=%s sniffed=%s", input.TicketId, input.Scope.ActorUserId, input.Filename, sniffed))
-		return nil, ErrAttachmentMimeNotAllowed
-	}
-
-	// L4: real-decode validation — DecodeConfig 先取尺寸（廉价）
-	cfg, format, err := decodeAttachmentConfig(data)
-	if err != nil {
-		common.SysError(fmt.Sprintf("ticket attachment config decode failed: ticket=%d user=%d filename=%s mime=%s err=%s", input.TicketId, input.Scope.ActorUserId, input.Filename, sniffed, err.Error()))
-		return nil, ErrAttachmentDecodeFailed
-	}
-	if cfg.Width <= 0 || cfg.Height <= 0 {
-		common.SysError(fmt.Sprintf("ticket attachment invalid image size: ticket=%d user=%d filename=%s width=%d height=%d", input.TicketId, input.Scope.ActorUserId, input.Filename, cfg.Width, cfg.Height))
-		return nil, ErrAttachmentDecodeFailed
-	}
-	// 防解压炸弹：宽×高超过像素上限直接拒绝
-	if int64(cfg.Width)*int64(cfg.Height) > limits.MaxImagePixels {
-		return nil, ErrAttachmentTooManyPixels
-	}
-	if _, ok := allowedAttachmentFormats[format]; !ok {
-		common.SysError(fmt.Sprintf("ticket attachment format rejected: ticket=%d user=%d filename=%s format=%s", input.TicketId, input.Scope.ActorUserId, input.Filename, format))
-		return nil, ErrAttachmentMimeNotAllowed
-	}
-
-	img, err := decodeAttachmentImage(data)
-	if err != nil {
-		common.SysError(fmt.Sprintf("ticket attachment decode failed: ticket=%d user=%d filename=%s mime=%s format=%s err=%s", input.TicketId, input.Scope.ActorUserId, input.Filename, sniffed, format, err.Error()))
-		return nil, ErrAttachmentDecodeFailed
-	}
-
-	// L6: forced re-encode + compression (kills polyglot / EXIF / embedded payloads)
-	finalBytes, finalMime, finalWidth, finalHeight, err := compressAttachmentImage(img, format, data, limits)
-	if err != nil {
-		return nil, err
-	}
-	if len(finalBytes) > limits.MaxStoredBytes {
-		return nil, ErrAttachmentTooComplex
-	}
-
-	// L7: sha256 dedup
-	sum := sha256.Sum256(finalBytes)
-	hexSha := hex.EncodeToString(sum[:])
-
-	// 权限闸门 + L9 上限校验：先放在 sha 之后，确保不浪费上传压缩计算
+	// L1 (W01): 权限闸门提前 — 在读 body 之前就拒绝越权 / closed / replyId 不属于工单 / 数量超限
 	ticket, err := getTicketForActor(input.TicketId, input.Scope)
 	if err != nil {
 		return nil, err
@@ -180,38 +117,86 @@ func UploadTicketAttachment(input UploadAttachmentInput) (*model.TicketAttachmen
 			return nil, err
 		}
 	}
-
-	count, err := model.CountAttachmentsForTicket(input.TicketId)
-	if err != nil {
+	if count, err := model.CountAttachmentsForTicket(input.TicketId); err != nil {
 		return nil, err
-	}
-	if count >= int64(limits.MaxTicketAttachments) {
+	} else if count >= int64(limits.MaxTicketAttachments) {
 		return nil, ErrAttachmentLimitReached
 	}
 	if input.ReplyId > 0 {
-		replyCount, err := model.CountAttachmentsForReply(input.ReplyId)
-		if err != nil {
+		if c, err := model.CountAttachmentsForReply(input.ReplyId); err != nil {
 			return nil, err
-		}
-		if replyCount >= int64(limits.MaxReplyAttachments) {
+		} else if c >= int64(limits.MaxReplyAttachments) {
 			return nil, ErrAttachmentLimitReached
 		}
 	}
-	totalSize, err := model.SumAttachmentSizeForTicket(input.TicketId)
+
+	// L2: defense-in-depth — read body with hard cap
+	data, err := io.ReadAll(io.LimitReader(input.File, int64(limits.MaxUploadBytes)+1))
 	if err != nil {
 		return nil, err
 	}
-	if totalSize+int64(len(finalBytes)) > limits.MaxTicketTotalBytes {
+	if len(data) > limits.MaxUploadBytes {
+		return nil, ErrAttachmentTooLarge
+	}
+	if len(data) == 0 {
+		common.SysError(fmt.Sprintf("ticket attachment empty upload: ticket=%d user=%d filename=%q", input.TicketId, input.Scope.ActorUserId, input.Filename))
+		return nil, ErrAttachmentDecodeFailed
+	}
+
+	// L3: MIME magic-byte sniffing (do NOT trust client-declared Content-Type)
+	sniffed := sniffAttachmentMime(data)
+	if sniffed == "image/svg+xml" {
+		common.SysError(fmt.Sprintf("ticket attachment rejected svg: ticket=%d user=%d filename=%q", input.TicketId, input.Scope.ActorUserId, input.Filename))
+		return nil, ErrAttachmentMimeNotAllowed
+	}
+	if _, ok := allowedAttachmentMimes[sniffed]; !ok {
+		common.SysError(fmt.Sprintf("ticket attachment mime rejected: ticket=%d user=%d filename=%q sniffed=%s", input.TicketId, input.Scope.ActorUserId, input.Filename, sniffed))
+		return nil, ErrAttachmentMimeNotAllowed
+	}
+
+	// L4: real-decode validation — DecodeConfig 先取尺寸（廉价）
+	cfg, format, err := decodeAttachmentConfig(data)
+	if err != nil {
+		common.SysError(fmt.Sprintf("ticket attachment config decode failed: ticket=%d user=%d filename=%q mime=%s err=%s", input.TicketId, input.Scope.ActorUserId, input.Filename, sniffed, err.Error()))
+		return nil, ErrAttachmentDecodeFailed
+	}
+	if cfg.Width <= 0 || cfg.Height <= 0 {
+		common.SysError(fmt.Sprintf("ticket attachment invalid image size: ticket=%d user=%d filename=%q width=%d height=%d", input.TicketId, input.Scope.ActorUserId, input.Filename, cfg.Width, cfg.Height))
+		return nil, ErrAttachmentDecodeFailed
+	}
+	if int64(cfg.Width)*int64(cfg.Height) > limits.MaxImagePixels {
+		return nil, ErrAttachmentTooManyPixels
+	}
+	if _, ok := allowedAttachmentFormats[format]; !ok {
+		common.SysError(fmt.Sprintf("ticket attachment format rejected: ticket=%d user=%d filename=%q format=%s", input.TicketId, input.Scope.ActorUserId, input.Filename, format))
+		return nil, ErrAttachmentMimeNotAllowed
+	}
+
+	img, err := decodeAttachmentImage(data)
+	if err != nil {
+		common.SysError(fmt.Sprintf("ticket attachment decode failed: ticket=%d user=%d filename=%q mime=%s format=%s err=%s", input.TicketId, input.Scope.ActorUserId, input.Filename, sniffed, format, err.Error()))
+		return nil, ErrAttachmentDecodeFailed
+	}
+
+	// L5: forced re-encode + compression (kills polyglot / EXIF / embedded payloads)
+	finalBytes, finalMime, finalWidth, finalHeight, err := compressAttachmentImage(img, format, limits)
+	if err != nil {
+		return nil, err
+	}
+	if len(finalBytes) > limits.MaxStoredBytes {
+		return nil, ErrAttachmentTooComplex
+	}
+
+	// L6: sha256 + 总量预检（事务外 best-effort，事务内做最终判定）
+	sum := sha256.Sum256(finalBytes)
+	hexSha := hex.EncodeToString(sum[:])
+	if totalSize, err := model.SumAttachmentSizeForTicket(input.TicketId); err != nil {
+		return nil, err
+	} else if totalSize+int64(len(finalBytes)) > limits.MaxTicketTotalBytes {
 		return nil, ErrAttachmentTotalSizeExceeded
 	}
 
-	if existing, err := model.FindAttachmentBySha(input.TicketId, hexSha); err == nil && existing != nil {
-		return nil, ErrAttachmentDuplicate
-	} else if err != nil && !errors.Is(err, gorm.ErrRecordNotFound) {
-		return nil, err
-	}
-
-	// L8: filename sanitize
+	// L7: filename sanitize
 	filename := sanitizeAttachmentFilename(input.Filename, finalMime, hexSha, limits.MaxFilenameLen)
 	attachment := &model.TicketAttachment{
 		TicketId:   input.TicketId,
@@ -228,7 +213,44 @@ func UploadTicketAttachment(input UploadAttachmentInput) (*model.TicketAttachmen
 		Data:       finalBytes,
 	}
 
+	// L8 (W02): 事务内做最终一致性校验 — count / sum / dedup 重新读取，
+	// 防止两个并发上传同时通过事务外的 best-effort 检查后双双 insert 突破限额
 	if err := model.DB.Transaction(func(tx *gorm.DB) error {
+		var count int64
+		if err := tx.Model(&model.TicketAttachment{}).Where("ticket_id = ?", input.TicketId).Count(&count).Error; err != nil {
+			return err
+		}
+		if count >= int64(limits.MaxTicketAttachments) {
+			return ErrAttachmentLimitReached
+		}
+		if input.ReplyId > 0 {
+			var replyCount int64
+			if err := tx.Model(&model.TicketAttachment{}).Where("reply_id = ?", input.ReplyId).Count(&replyCount).Error; err != nil {
+				return err
+			}
+			if replyCount >= int64(limits.MaxReplyAttachments) {
+				return ErrAttachmentLimitReached
+			}
+		}
+		var sumRow struct{ Total int64 }
+		if err := tx.Model(&model.TicketAttachment{}).
+			Where("ticket_id = ?", input.TicketId).
+			Select("COALESCE(SUM(size), 0) AS total").
+			Scan(&sumRow).Error; err != nil {
+			return err
+		}
+		if sumRow.Total+int64(len(finalBytes)) > limits.MaxTicketTotalBytes {
+			return ErrAttachmentTotalSizeExceeded
+		}
+		var dupCount int64
+		if err := tx.Model(&model.TicketAttachment{}).
+			Where("ticket_id = ? AND sha256 = ?", input.TicketId, hexSha).
+			Count(&dupCount).Error; err != nil {
+			return err
+		}
+		if dupCount > 0 {
+			return ErrAttachmentDuplicate
+		}
 		if err := model.CreateAttachmentTx(tx, attachment); err != nil {
 			return err
 		}
@@ -237,8 +259,8 @@ func UploadTicketAttachment(input UploadAttachmentInput) (*model.TicketAttachmen
 		return nil, err
 	}
 
-	// L10: audit log
-	common.SysLog(fmt.Sprintf("ticket attachment uploaded: ticket=%d user=%d sha=%s size_in=%d size_out=%d mime=%s", input.TicketId, input.Scope.ActorUserId, hexSha, len(data), len(finalBytes), finalMime))
+	// L9: audit log（filename 用 %q 转义防 CRLF log forging）
+	common.SysLog(fmt.Sprintf("ticket attachment uploaded: ticket=%d user=%d sha=%s size_in=%d size_out=%d mime=%s filename=%q", input.TicketId, input.Scope.ActorUserId, hexSha, len(data), len(finalBytes), finalMime, filename))
 	return attachment, nil
 }
 
@@ -257,6 +279,22 @@ func DownloadTicketAttachment(attachmentId int64, scope DataScope) (*model.Ticke
 		return nil, err
 	}
 	return attachment, nil
+}
+
+// DeleteTicketAttachmentInTicket 在删除前先校验 attachmentId 确属于 ticketId（防越权）。
+// I01 修复：controller 路由 /ticket/:id/attachment/:aid 现在会传 ticketId 进来。
+func DeleteTicketAttachmentInTicket(ticketId int, attachmentId int64, scope DataScope) error {
+	meta, err := model.GetAttachmentMeta(attachmentId)
+	if err != nil {
+		if errors.Is(err, gorm.ErrRecordNotFound) {
+			return ErrAttachmentForbidden
+		}
+		return err
+	}
+	if meta.TicketId != ticketId {
+		return ErrAttachmentForbidden
+	}
+	return DeleteTicketAttachment(attachmentId, scope)
 }
 
 // DeleteTicketAttachment 仅原始上传者或 tenant_admin / platform_admin 可删除；
@@ -382,21 +420,11 @@ func decodeAttachmentImage(data []byte) (image.Image, error) {
 	return webp.Decode(bytes.NewReader(data))
 }
 
-func compressAttachmentImage(img image.Image, format string, data []byte, limits AttachmentLimits) ([]byte, string, int, int, error) {
-	forcePNG := false
-	if format == "gif" {
-		// 多帧 GIF 仅取首帧（防御 GIF 渲染漏洞 + 大幅减小体积）
-		g, err := gif.DecodeAll(bytes.NewReader(data))
-		if err != nil {
-			return nil, "", 0, 0, ErrAttachmentDecodeFailed
-		}
-		if len(g.Image) > 1 {
-			img = g.Image[0]
-			forcePNG = true
-		}
-	}
-
-	if forcePNG || imageHasAlpha(img) {
+// compressAttachmentImage 把已解出的首帧图像重编码。
+// W05 修复：不再调用 gif.DecodeAll（多帧 GIF 会一次性把所有帧解到内存，N 帧 × 像素 = OOM 隐患）。
+// image.Decode 对 GIF 默认只解首帧；这里直接把所有 GIF 一律走 PNG 路径（保证不带动画 + 不带额外帧）。
+func compressAttachmentImage(img image.Image, format string, limits AttachmentLimits) ([]byte, string, int, int, error) {
+	if format == "gif" || imageHasAlpha(img) {
 		return compressAttachmentPNG(img, limits)
 	}
 	return compressAttachmentJPEG(img, limits)

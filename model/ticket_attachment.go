@@ -11,8 +11,11 @@ import (
 //   - filename 必须经过 sanitize；
 //   - mime 取服务端嗅探结果，不信任客户端。
 //
-// 三库兼容：data 用 mediumblob 标签，SQLite 实际存为 BLOB、PostgreSQL 存为 BYTEA、
-// MySQL 存为 MEDIUMBLOB（最大 16MB，远超单文件 256KB 限制）。
+// 三库兼容：data 字段不显式声明 type，让 GORM 按 dialect 自动映射：
+//   - SQLite  → BLOB
+//   - MySQL   → LONGBLOB（[]byte 默认；远超单文件 256KB 限制）
+//   - PostgreSQL → BYTEA
+// 显式 `type:mediumblob` 在 PostgreSQL 会被原样下发为列类型导致 AutoMigrate 失败 (codex C01)。
 type TicketAttachment struct {
 	Id         int64  `gorm:"primaryKey" json:"id"`
 	TicketId   int    `gorm:"not null;index" json:"ticket_id"`
@@ -26,7 +29,7 @@ type TicketAttachment struct {
 	Width      int    `gorm:"type:int;default:0" json:"width"`
 	Height     int    `gorm:"type:int;default:0" json:"height"`
 	Sha256     string `gorm:"type:char(64);not null;index" json:"sha256"`
-	Data       []byte `gorm:"type:mediumblob" json:"-"`
+	Data       []byte `json:"-"`
 
 	CreatedAt int64          `gorm:"autoCreateTime;index" json:"created_at"`
 	DeletedAt gorm.DeletedAt `gorm:"index" json:"-"`
