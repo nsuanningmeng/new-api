@@ -23,6 +23,7 @@ type createTenantRequest struct {
 	MinWithdrawAmount  int64  `json:"min_withdraw_amount"`
 	MaxResellerLevel   int    `json:"max_reseller_level"`
 	Remark             string `json:"remark"`
+	OwnerUserId        int    `json:"owner_user_id"`
 }
 
 type updateTenantRequest struct {
@@ -38,6 +39,7 @@ type updateTenantRequest struct {
 	MinWithdrawAmount  *int64  `json:"min_withdraw_amount"`
 	MaxResellerLevel   *int    `json:"max_reseller_level"`
 	Remark             *string `json:"remark"`
+	OwnerUserId        *int    `json:"owner_user_id"`
 }
 
 func GetTenants(c *gin.Context) {
@@ -102,6 +104,7 @@ func CreateTenant(c *gin.Context) {
 		MinWithdrawAmount:  req.MinWithdrawAmount,
 		MaxResellerLevel:   req.MaxResellerLevel,
 		Remark:             req.Remark,
+		OwnerUserId:        req.OwnerUserId,
 		Status:             model.TenantStatusEnabled,
 	}
 	if err := model.DB.Create(&tenant).Error; err != nil {
@@ -159,6 +162,9 @@ func UpdateTenant(c *gin.Context) {
 	}
 	if req.Remark != nil {
 		updates["remark"] = *req.Remark
+	}
+	if req.OwnerUserId != nil {
+		updates["owner_user_id"] = *req.OwnerUserId
 	}
 	if len(updates) == 0 {
 		common.ApiSuccess(c, nil)
