@@ -72,6 +72,8 @@ func SettleSaaSProfit(tx *gorm.DB, relayInfo *relaycommon.RelayInfo, actualQuota
 			TenantProfit:            tenantProfit,
 			ResellerProfit:          resellerProfit,
 			Currency:                q.Currency,
+			RuleId:                  q.RuleId,
+			RuleVersion:             q.RuleVersion,
 		}
 		if snapshot.Currency == "" {
 			snapshot.Currency = "USD"

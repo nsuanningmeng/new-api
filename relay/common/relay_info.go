@@ -88,6 +88,8 @@ type SaaSPriceQuote struct {
 	TenantId                int
 	ResellerId              int
 	PriceRuleIds            []int
+	RuleId                  int
+	RuleVersion             int
 	PlatformCostQuota       int64
 	TenantSettlementQuota   int64
 	ResellerSettlementQuota int64

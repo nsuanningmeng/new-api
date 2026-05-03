@@ -9,6 +9,7 @@ import (
 
 	"github.com/QuantumNous/new-api/model"
 	relaycommon "github.com/QuantumNous/new-api/relay/common"
+	"gorm.io/gorm"
 )
 
 const priceRuleStatusEnabled = 1
@@ -39,15 +40,31 @@ func ResolveSaaSPriceQuote(tenantId, resellerId, userId int, modelName, group st
 		if !ok {
 			continue
 		}
+		// 选完 rule 后，取该 rule 的 active version 作为快照锚点。
+		// 优先使用 active version 的价目（如果存在），落后兼容：未做 versioning 的旧 rule 直接用 PriceRule 字段。
+		version, vOk, vErr := findActiveRuleVersion(rule.Id)
+		if vErr != nil {
+			return nil, vErr
+		}
 		quote := &relaycommon.SaaSPriceQuote{
-			TenantId:                tenantId,
-			ResellerId:              resellerId,
-			PriceRuleIds:            []int{rule.Id},
-			PlatformCostQuota:       rule.PlatformCostQuota,
-			TenantSettlementQuota:   rule.TenantSettlementQuota,
-			ResellerSettlementQuota: rule.ResellerSettlementQuota,
-			RetailPriceQuota:        rule.RetailPriceQuota,
-			Currency:                strings.TrimSpace(rule.Currency),
+			TenantId:     tenantId,
+			ResellerId:   resellerId,
+			PriceRuleIds: []int{rule.Id},
+			RuleId:       rule.Id,
+		}
+		if vOk {
+			quote.RuleVersion = version.Version
+			quote.PlatformCostQuota = version.PlatformCostQuota
+			quote.TenantSettlementQuota = version.TenantSettlementQuota
+			quote.ResellerSettlementQuota = version.ResellerSettlementQuota
+			quote.RetailPriceQuota = version.RetailPriceQuota
+			quote.Currency = strings.TrimSpace(version.Currency)
+		} else {
+			quote.PlatformCostQuota = rule.PlatformCostQuota
+			quote.TenantSettlementQuota = rule.TenantSettlementQuota
+			quote.ResellerSettlementQuota = rule.ResellerSettlementQuota
+			quote.RetailPriceQuota = rule.RetailPriceQuota
+			quote.Currency = strings.TrimSpace(rule.Currency)
 		}
 		if quote.Currency == "" {
 			quote.Currency = "USD"
@@ -139,4 +156,24 @@ func priceMatchScore(ruleVal, reqVal string) int {
 		return 1
 	}
 	return 0
+}
+
+// findActiveRuleVersion 选取给定 rule 的当前 active version。
+// active 定义：status = enabled AND effective_at <= now AND (expires_at = 0 OR expires_at > now)
+// 多 active 时按 version DESC 取最新。无任何 version 时返回 false（resolver 落回 PriceRule 自身字段）。
+func findActiveRuleVersion(ruleId int) (*model.PriceRuleVersion, bool, error) {
+	now := time.Now().Unix()
+	var version model.PriceRuleVersion
+	err := model.DB.
+		Where("rule_id = ? AND status = ? AND effective_at <= ? AND (expires_at = ? OR expires_at > ?)",
+			ruleId, priceRuleStatusEnabled, now, int64(0), now).
+		Order("version DESC").
+		First(&version).Error
+	if err != nil {
+		if errors.Is(err, gorm.ErrRecordNotFound) {
+			return nil, false, nil
+		}
+		return nil, false, err
+	}
+	return &version, true, nil
 }

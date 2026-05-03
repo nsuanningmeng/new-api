@@ -1,6 +1,7 @@
 package model
 
 import (
+	"errors"
 	"fmt"
 	"log"
 	"os"
@@ -290,6 +291,7 @@ func migrateDB() error {
 		&WalletAccount{},
 		&WalletLedger{},
 		&PriceRule{},
+		&PriceRuleVersion{},
 		&PriceSnapshot{},
 		&RechargeOrder{},
 		&WithdrawOrder{},
@@ -306,6 +308,9 @@ func migrateDB() error {
 		if err := DB.AutoMigrate(&SubscriptionPlan{}); err != nil {
 			return err
 		}
+	}
+	if err := backfillPriceRuleVersions(); err != nil {
+		return err
 	}
 	return nil
 }
@@ -349,6 +354,7 @@ func migrateDBFast() error {
 		{&WalletAccount{}, "WalletAccount"},
 		{&WalletLedger{}, "WalletLedger"},
 		{&PriceRule{}, "PriceRule"},
+		{&PriceRuleVersion{}, "PriceRuleVersion"},
 		{&PriceSnapshot{}, "PriceSnapshot"},
 		{&RechargeOrder{}, "RechargeOrder"},
 		{&WithdrawOrder{}, "WithdrawOrder"},
@@ -385,6 +391,9 @@ func migrateDBFast() error {
 		if err := DB.AutoMigrate(&SubscriptionPlan{}); err != nil {
 			return err
 		}
+	}
+	if err := backfillPriceRuleVersions(); err != nil {
+		return err
 	}
 	common.SysLog("database migrated")
 	return nil
@@ -725,5 +734,52 @@ func PingDB() error {
 
 	lastPingTime = time.Now()
 	common.SysLog("Database pinged successfully")
+	return nil
+}
+
+// backfillPriceRuleVersions 把现有 PriceRule 行幂等地复制成 PriceRuleVersion(version=1)
+// 并将 PriceRule.CurrentVersion 置为 1。已迁移行（CurrentVersion>0）跳过。
+// SQLite/MySQL/PostgreSQL 通用：仅用 GORM First / Create / Update，无 backend-specific SQL。
+func backfillPriceRuleVersions() error {
+	var rules []PriceRule
+	if err := DB.Where("current_version = ? OR current_version IS NULL", 0).Find(&rules).Error; err != nil {
+		return err
+	}
+	if len(rules) == 0 {
+		return nil
+	}
+	for _, rule := range rules {
+		var existing PriceRuleVersion
+		err := DB.Where("rule_id = ? AND version = ?", rule.Id, 1).First(&existing).Error
+		if err != nil && !errors.Is(err, gorm.ErrRecordNotFound) {
+			return fmt.Errorf("backfillPriceRuleVersions lookup rule %d: %w", rule.Id, err)
+		}
+		if errors.Is(err, gorm.ErrRecordNotFound) {
+			version := PriceRuleVersion{
+				RuleId:                  rule.Id,
+				Version:                 1,
+				ModelName:               rule.ModelName,
+				Group:                   rule.Group,
+				BillingUnit:             rule.BillingUnit,
+				PlatformCostQuota:       rule.PlatformCostQuota,
+				TenantSettlementQuota:   rule.TenantSettlementQuota,
+				ResellerSettlementQuota: rule.ResellerSettlementQuota,
+				RetailPriceQuota:        rule.RetailPriceQuota,
+				Currency:                rule.Currency,
+				Status:                  1,
+				EffectiveAt:             rule.EffectiveAt,
+				ExpiresAt:               rule.ExpiredAt,
+			}
+			if err := DB.Create(&version).Error; err != nil {
+				return fmt.Errorf("backfillPriceRuleVersions create v1 for rule %d: %w", rule.Id, err)
+			}
+		}
+		if rule.CurrentVersion != 1 {
+			if err := DB.Model(&PriceRule{}).Where("id = ?", rule.Id).Update("current_version", 1).Error; err != nil {
+				return fmt.Errorf("backfillPriceRuleVersions set current_version for rule %d: %w", rule.Id, err)
+			}
+		}
+	}
+	common.SysLog(fmt.Sprintf("backfillPriceRuleVersions: migrated %d price_rules to v1", len(rules)))
 	return nil
 }

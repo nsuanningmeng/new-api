@@ -181,9 +181,33 @@ type PriceRule struct {
 	ExpiredAt               int64          `json:"expired_at" gorm:"type:bigint;default:0;index"`
 	Version                 int            `json:"version" gorm:"type:int;default:1"`
 	Remark                  string         `json:"remark" gorm:"type:varchar(255);default:''"`
+	CurrentVersion          int            `json:"current_version" gorm:"type:int;default:0;index"`
+	ArchivedAt              int64          `json:"archived_at" gorm:"type:bigint;default:0"`
 	CreatedAt               int64          `json:"created_at" gorm:"autoCreateTime"`
 	UpdatedAt               int64          `json:"updated_at" gorm:"autoUpdateTime"`
 	DeletedAt               gorm.DeletedAt `json:"-" gorm:"index"`
+}
+
+// PriceRuleVersion 价格规则的不可变版本记录。每次 PriceRule 价格字段变更都会
+// expire 旧 active version 并 create 一条新 version，保留完整历史。
+// 价格解析与结算锚点用 (rule_id, version) 写入 PriceSnapshot。
+type PriceRuleVersion struct {
+	Id                      int    `json:"id"`
+	RuleId                  int    `json:"rule_id" gorm:"not null;uniqueIndex:idx_prv_rule_version,priority:1;index:idx_prv_active,priority:1"`
+	Version                 int    `json:"version" gorm:"type:int;not null;uniqueIndex:idx_prv_rule_version,priority:2"`
+	ModelName               string `json:"model_name" gorm:"type:varchar(128);default:'*'"`
+	Group                   string `json:"group" gorm:"type:varchar(64);default:'*'"`
+	BillingUnit             string `json:"billing_unit" gorm:"type:varchar(32);default:'quota'"`
+	PlatformCostQuota       int64  `json:"platform_cost_quota" gorm:"type:bigint;default:0"`
+	TenantSettlementQuota   int64  `json:"tenant_settlement_quota" gorm:"type:bigint;default:0"`
+	ResellerSettlementQuota int64  `json:"reseller_settlement_quota" gorm:"type:bigint;default:0"`
+	RetailPriceQuota        int64  `json:"retail_price_quota" gorm:"type:bigint;default:0"`
+	Currency                string `json:"currency" gorm:"type:varchar(8);default:'USD'"`
+	Status                  int    `json:"status" gorm:"type:int;default:1;index:idx_prv_active,priority:2"`
+	EffectiveAt             int64  `json:"effective_at" gorm:"type:bigint;default:0;index:idx_prv_active,priority:3"`
+	ExpiresAt               int64  `json:"expires_at" gorm:"type:bigint;default:0;index:idx_prv_active,priority:4"`
+	CreatedAt               int64  `json:"created_at" gorm:"autoCreateTime"`
+	UpdatedAt               int64  `json:"updated_at" gorm:"autoUpdateTime"`
 }
 
 // PriceSnapshot 不可变价格快照
@@ -207,6 +231,8 @@ type PriceSnapshot struct {
 	TenantProfit            int64  `json:"tenant_profit" gorm:"type:bigint;default:0"`
 	ResellerProfit          int64  `json:"reseller_profit" gorm:"type:bigint;default:0"`
 	Currency                string `json:"currency" gorm:"type:varchar(8);default:'USD'"`
+	RuleId                  int    `json:"rule_id" gorm:"default:0;index"`
+	RuleVersion             int    `json:"rule_version" gorm:"default:0"`
 	CreatedAt               int64  `json:"created_at" gorm:"autoCreateTime;index"`
 }
 

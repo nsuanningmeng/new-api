@@ -4,12 +4,14 @@ import (
 	"errors"
 	"strconv"
 	"strings"
+	"time"
 
 	"github.com/QuantumNous/new-api/common"
 	"github.com/QuantumNous/new-api/model"
 	relaycommon "github.com/QuantumNous/new-api/relay/common"
 	"github.com/QuantumNous/new-api/service"
 	"github.com/gin-gonic/gin"
+	"gorm.io/gorm"
 )
 
 const priceRuleStatusEnabled = 1
@@ -103,7 +105,16 @@ func CreatePriceRule(c *gin.Context) {
 		common.ApiErrorStr(c, err.Error())
 		return
 	}
-	if err := model.DB.Create(&rule).Error; err != nil {
+	// 事务内创建 PriceRule + 同步 v1 PriceRuleVersion，让所有新规则一进库就有版本锚点。
+	err := model.DB.Transaction(func(tx *gorm.DB) error {
+		rule.CurrentVersion = 1
+		if err := tx.Create(&rule).Error; err != nil {
+			return err
+		}
+		version := buildPriceRuleVersion(&rule, 1)
+		return tx.Create(&version).Error
+	})
+	if err != nil {
 		common.ApiError(c, err)
 		return
 	}
@@ -121,6 +132,7 @@ func UpdatePriceRule(c *gin.Context) {
 		common.ApiError(c, err)
 		return
 	}
+	oldRule := rule
 	var req updatePriceRuleRequest
 	if err := c.ShouldBindJSON(&req); err != nil {
 		common.ApiErrorStr(c, "invalid params")
@@ -170,7 +182,35 @@ func UpdatePriceRule(c *gin.Context) {
 		common.ApiErrorStr(c, err.Error())
 		return
 	}
-	if err := model.DB.Save(&rule).Error; err != nil {
+
+	// 价格字段变更 → expire 旧 active version + 创建新 version + 自增 PriceRule.CurrentVersion
+	// 非价格字段变更（priority/status/remark）→ 原地 Save，不动 versions
+	priceChanged := priceFieldsChanged(&oldRule, &rule)
+	err = model.DB.Transaction(func(tx *gorm.DB) error {
+		if priceChanged {
+			now := time.Now().Unix()
+			if err := tx.Model(&model.PriceRuleVersion{}).
+				Where("rule_id = ? AND status = ? AND (expires_at = ? OR expires_at > ?)",
+					rule.Id, priceRuleStatusEnabled, int64(0), now).
+				Updates(map[string]any{"status": 0, "expires_at": now}).Error; err != nil {
+				return err
+			}
+			rule.CurrentVersion = oldRule.CurrentVersion + 1
+			if rule.CurrentVersion <= 1 {
+				rule.CurrentVersion = 2
+			}
+		}
+		if err := tx.Save(&rule).Error; err != nil {
+			return err
+		}
+		if priceChanged {
+			version := buildPriceRuleVersion(&rule, rule.CurrentVersion)
+			version.EffectiveAt = time.Now().Unix()
+			return tx.Create(&version).Error
+		}
+		return nil
+	})
+	if err != nil {
 		common.ApiError(c, err)
 		return
 	}
@@ -240,4 +280,43 @@ func validatePriceRule(rule *model.PriceRule) error {
 		RetailPriceQuota:        rule.RetailPriceQuota,
 		Currency:                rule.Currency,
 	})
+}
+
+// buildPriceRuleVersion 把 rule 当前价目快照写入一条 PriceRuleVersion。
+// EffectiveAt 默认沿用 rule.EffectiveAt，调用方可在 Update 路径覆盖为 now。
+func buildPriceRuleVersion(rule *model.PriceRule, version int) model.PriceRuleVersion {
+	return model.PriceRuleVersion{
+		RuleId:                  rule.Id,
+		Version:                 version,
+		ModelName:               rule.ModelName,
+		Group:                   rule.Group,
+		BillingUnit:             rule.BillingUnit,
+		PlatformCostQuota:       rule.PlatformCostQuota,
+		TenantSettlementQuota:   rule.TenantSettlementQuota,
+		ResellerSettlementQuota: rule.ResellerSettlementQuota,
+		RetailPriceQuota:        rule.RetailPriceQuota,
+		Currency:                rule.Currency,
+		Status:                  priceRuleStatusEnabled,
+		EffectiveAt:             rule.EffectiveAt,
+		ExpiresAt:               rule.ExpiredAt,
+	}
+}
+
+// priceFieldsChanged 判断关键价格/作用域字段是否变化；只有变化才触发 expire-and-create。
+// 不计入：Priority / Status / Remark（这些只是元数据，不影响订单结算）。
+func priceFieldsChanged(old, neu *model.PriceRule) bool {
+	if old.PlatformCostQuota != neu.PlatformCostQuota ||
+		old.TenantSettlementQuota != neu.TenantSettlementQuota ||
+		old.ResellerSettlementQuota != neu.ResellerSettlementQuota ||
+		old.RetailPriceQuota != neu.RetailPriceQuota {
+		return true
+	}
+	if old.ModelName != neu.ModelName || old.Group != neu.Group ||
+		old.BillingUnit != neu.BillingUnit || old.Currency != neu.Currency {
+		return true
+	}
+	if old.EffectiveAt != neu.EffectiveAt || old.ExpiredAt != neu.ExpiredAt {
+		return true
+	}
+	return false
 }
