@@ -2,7 +2,7 @@
 Copyright (C) 2025 QuantumNous
 */
 
-import React, { useState, useEffect, useCallback } from 'react';
+import React, { useState, useEffect, useCallback, useRef } from 'react';
 import { useParams, useNavigate } from 'react-router-dom';
 import {
   Typography,
@@ -18,8 +18,16 @@ import {
   Avatar,
   Divider,
   Select,
+  Upload,
+  Image,
 } from '@douyinfe/semi-ui';
-import { IconUser, IconCustomerService, IconSetting } from '@douyinfe/semi-icons';
+import {
+  IconUser,
+  IconCustomerService,
+  IconSetting,
+  IconPlus,
+  IconDelete,
+} from '@douyinfe/semi-icons';
 import { useTranslation } from 'react-i18next';
 import {
   API,
@@ -30,6 +38,13 @@ import {
   timestamp2string,
   getUserIdFromLocalStorage,
 } from '../../helpers';
+import {
+  compressImage,
+  validateImageFile,
+  uploadAttachment,
+  deleteAttachment,
+  fetchAttachmentBlob,
+} from '../../helpers/ticket-upload';
 
 const { Title, Text, Paragraph } = Typography;
 
@@ -42,7 +57,29 @@ const TicketDetail = () => {
   const [loading, setLoading] = useState(true);
   const [replyContent, setReplyContent] = useState('');
   const [submitting, setSubmitting] = useState(false);
+  const [attachmentUrls, setAttachmentUrls] = useState({});
+  const [uploading, setUploading] = useState(false);
   const currentUserId = getUserIdFromLocalStorage();
+  // 用 ref 持有最新 url 集合，便于 cleanup 时正确 revoke（避免依赖闭包陷阱）
+  const urlMapRef = useRef({});
+
+  const loadAttachmentPreviews = useCallback(
+    async (attachments) => {
+      for (const att of attachments) {
+        if (att.mime?.startsWith('image/') && !urlMapRef.current[att.id]) {
+          try {
+            const blob = await fetchAttachmentBlob(id, att.id);
+            const url = URL.createObjectURL(blob);
+            urlMapRef.current[att.id] = url;
+            setAttachmentUrls({ ...urlMapRef.current });
+          } catch (e) {
+            console.error('Failed to load preview', e);
+          }
+        }
+      }
+    },
+    [id]
+  );
 
   const fetchDetail = useCallback(async () => {
     setLoading(true);
@@ -53,6 +90,7 @@ const TicketDetail = () => {
       if (res.data.success) {
         setTicket(res.data.data);
         setReplies(res.data.data.replies || []);
+        loadAttachmentPreviews(res.data.data.attachments || []);
       } else {
         showError(res.data.message || t('加载失败'));
       }
@@ -61,10 +99,15 @@ const TicketDetail = () => {
     } finally {
       setLoading(false);
     }
-  }, [id, t]);
+  }, [id, t, loadAttachmentPreviews]);
 
   useEffect(() => {
     fetchDetail();
+    // unmount 时一次性 revoke 所有 blob URL
+    return () => {
+      Object.values(urlMapRef.current).forEach((url) => URL.revokeObjectURL(url));
+      urlMapRef.current = {};
+    };
   }, [fetchDetail]);
 
   const handleReply = async () => {
@@ -85,6 +128,47 @@ const TicketDetail = () => {
     } finally {
       setSubmitting(false);
     }
+  };
+
+  const handleUpload = async ({ file }) => {
+    const fileInstance = file?.fileInstance || file;
+    const validation = validateImageFile(fileInstance);
+    if (!validation.ok) {
+      showError(t(validation.error));
+      return;
+    }
+
+    setUploading(true);
+    try {
+      const compressed = await compressImage(fileInstance);
+      await uploadAttachment(id, compressed);
+      showSuccess(t('上传成功'));
+      fetchDetail();
+    } catch (e) {
+      showError(e.message || t('上传失败'));
+    } finally {
+      setUploading(false);
+    }
+  };
+
+  const handleDeleteAttachment = (attId) => {
+    Modal.confirm({
+      title: t('确认删除附件?'),
+      onOk: async () => {
+        try {
+          await deleteAttachment(id, attId);
+          showSuccess(t('删除成功'));
+          if (urlMapRef.current[attId]) {
+            URL.revokeObjectURL(urlMapRef.current[attId]);
+            delete urlMapRef.current[attId];
+            setAttachmentUrls({ ...urlMapRef.current });
+          }
+          fetchDetail();
+        } catch (e) {
+          showError(e.message || t('删除失败'));
+        }
+      },
+    });
   };
 
   const handleAction = (action) => {
@@ -148,8 +232,8 @@ const TicketDetail = () => {
   if (!ticket) return null;
 
   const isOwner = ticket.user_id === currentUserId;
-  const canEscalate = isOwner || isAdmin();
-  const canAssign = isAdmin() || isRoot();
+  const canEscalate = (isOwner || isAdmin()) && ticket.status !== 'closed';
+  const canAssign = (isAdmin() || isRoot()) && ticket.status !== 'closed';
   const canClose = ticket.status !== 'closed' && (isOwner || isAdmin());
 
   const metaData = [
@@ -160,6 +244,8 @@ const TicketDetail = () => {
     { key: t('升级次数'), value: ticket.escalate_count },
     { key: t('创建时间'), value: timestamp2string(ticket.created_at) },
   ];
+
+  const attachments = ticket.attachments || [];
 
   return (
     <div style={{ padding: '20px', marginTop: '60px' }}>
@@ -228,10 +314,7 @@ const TicketDetail = () => {
                   width: '100%',
                 }}
               >
-                <Avatar
-                  size='small'
-                  color={item.is_system ? 'orange' : item.is_admin ? 'blue' : 'green'}
-                >
+                <Avatar size='small' color={item.is_system ? 'orange' : item.is_admin ? 'blue' : 'green'}>
                   {item.is_system ? <IconSetting /> : item.is_admin ? <IconCustomerService /> : <IconUser />}
                 </Avatar>
                 <div style={{ maxWidth: '80%' }}>
@@ -263,20 +346,67 @@ const TicketDetail = () => {
         />
 
         <div style={{ marginTop: '20px' }}>
-          <Divider>{t('附件')}</Divider>
-          <div style={{ padding: '10px', color: 'var(--semi-color-text-2)' }}>
-            <Text type='secondary'>{t('附件功能 (Phase 2)')}</Text>
-            {ticket.attachments && ticket.attachments.length > 0 && (
-              <ul style={{ marginTop: 10 }}>
-                {ticket.attachments.map((a, i) => (
-                  <li key={i}>{a.filename || `file_${i}`}</li>
-                ))}
-              </ul>
+          <Divider align='left'>{t('附件')}</Divider>
+          <Space wrap spacing='medium' style={{ marginTop: 10 }}>
+            {attachments.map((att) => (
+              <Card
+                key={att.id}
+                bodyStyle={{ padding: '8px', display: 'flex', alignItems: 'center', gap: '8px' }}
+                style={{ width: '240px' }}
+              >
+                {att.mime?.startsWith('image/') ? (
+                  <Image
+                    width={48}
+                    height={48}
+                    src={attachmentUrls[att.id]}
+                    fallback={<div style={{ width: 48, height: 48, background: '#eee' }} />}
+                  />
+                ) : (
+                  <div
+                    style={{
+                      width: 48,
+                      height: 48,
+                      background: '#eee',
+                      display: 'flex',
+                      alignItems: 'center',
+                      justifyContent: 'center',
+                    }}
+                  >
+                    <Text size='small'>FILE</Text>
+                  </div>
+                )}
+                <div style={{ flex: 1, overflow: 'hidden' }}>
+                  <Text size='small' ellipsis style={{ width: '120px' }}>
+                    {att.filename}
+                  </Text>
+                  <br />
+                  <Text size='small' type='tertiary'>
+                    {(att.size / 1024).toFixed(1)} KB
+                  </Text>
+                </div>
+                {ticket.status !== 'closed' && (
+                  <Button
+                    size='small'
+                    type='danger'
+                    theme='borderless'
+                    icon={<IconDelete />}
+                    onClick={() => handleDeleteAttachment(att.id)}
+                  />
+                )}
+              </Card>
+            ))}
+            {ticket.status !== 'closed' && attachments.length < 5 && (
+              <Upload action='' customRequest={handleUpload} showUploadList={false} accept='image/png,image/jpeg,image/gif,image/webp'>
+                <Button icon={<IconPlus />} theme='outline' loading={uploading}>
+                  {t('上传附件')}
+                </Button>
+              </Upload>
             )}
-          </div>
+          </Space>
         </div>
 
         <div style={{ marginTop: '20px' }}>
+          <Divider />
           <TextArea
             rows={4}
             value={replyContent}

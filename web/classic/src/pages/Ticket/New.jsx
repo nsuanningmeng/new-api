@@ -4,32 +4,63 @@ Copyright (C) 2025 QuantumNous
 
 import React, { useState } from 'react';
 import { useNavigate } from 'react-router-dom';
-import { Form, Button, Card, Typography, Space } from '@douyinfe/semi-ui';
+import { Form, Button, Card, Typography, Space, Upload } from '@douyinfe/semi-ui';
+import { IconFile } from '@douyinfe/semi-icons';
 import { useTranslation } from 'react-i18next';
 import { API, showError, showSuccess } from '../../helpers';
+import { compressImage, validateImageFile, uploadAttachment } from '../../helpers/ticket-upload';
 
-const { Title } = Typography;
+const { Title, Text } = Typography;
 
 const TicketNew = () => {
   const { t } = useTranslation();
   const navigate = useNavigate();
   const [loading, setLoading] = useState(false);
+  // 新建工单时还没有 ticket id，先把文件存在内存里，提交后再上传
+  const [selectedFiles, setSelectedFiles] = useState([]);
 
   const handleSubmit = async (values) => {
     setLoading(true);
+    let ticketId = null;
     try {
       const res = await API.post('/api/ticket/', values);
       if (res.data.success) {
+        ticketId = res.data.data.id;
         showSuccess(t('工单创建成功'));
-        navigate(`/ticket/${res.data.data.id}`);
+
+        if (selectedFiles.length > 0) {
+          for (const file of selectedFiles) {
+            try {
+              const compressed = await compressImage(file);
+              await uploadAttachment(ticketId, compressed);
+            } catch (err) {
+              showError(`${t('上传失败')}: ${file.name} — ${err.message || ''}`);
+            }
+          }
+        }
+        navigate(`/ticket/${ticketId}`);
       } else {
         showError(res.data.message || t('提交失败'));
       }
     } catch (e) {
       showError(e);
+      // 工单已创建但附件失败的场景，也要把用户带去详情页继续操作
+      if (ticketId) navigate(`/ticket/${ticketId}`);
     } finally {
       setLoading(false);
     }
+  };
+
+  const handleFileChange = ({ fileList }) => {
+    const files = (fileList || [])
+      .map((f) => f.fileInstance)
+      .filter(Boolean)
+      .filter((f) => {
+        const v = validateImageFile(f);
+        if (!v.ok) showError(`${f.name}: ${t(v.error)}`);
+        return v.ok;
+      });
+    setSelectedFiles(files.slice(0, 5));
   };
 
   return (
@@ -46,7 +77,7 @@ const TicketNew = () => {
             rules={[{ required: true, message: t('请输入主题') }]}
             maxLength={255}
           />
-          <Form.Select field='category' label={t('分类')} style={{ width: '100%' }} initValue=''>
+          <Form.Select field='category' label={t('分类')} style={{ width: '100%' }} initValue='general'>
             <Form.Select.Option value='general'>{t('通用')}</Form.Select.Option>
             <Form.Select.Option value='billing'>{t('计费')}</Form.Select.Option>
             <Form.Select.Option value='technical'>{t('技术')}</Form.Select.Option>
@@ -67,6 +98,22 @@ const TicketNew = () => {
           <Form.Checkbox field='direct_to_platform' noLabel>
             {t('需要平台介入')}
           </Form.Checkbox>
+
+          <div style={{ marginTop: '20px' }}>
+            <Text strong>{t('附件')} (Max 5)</Text>
+            <Upload
+              action=''
+              limit={5}
+              accept='image/png,image/jpeg,image/gif,image/webp'
+              onChange={handleFileChange}
+              beforeUpload={() => false}
+              style={{ marginTop: 10 }}
+            >
+              <Button icon={<IconFile />} theme='outline'>
+                {t('选择附件')}
+              </Button>
+            </Upload>
+          </div>
 
           <div style={{ marginTop: '20px', display: 'flex', justifyContent: 'flex-end' }}>
             <Space>
