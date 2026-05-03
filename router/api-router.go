@@ -331,6 +331,33 @@ func SetApiRouter(router *gin.Engine) {
 			taskRoute.GET("/", middleware.AdminAuth(), controller.GetAllTask)
 		}
 
+		// Ticket routes (Phase 2 — user-side + admin/assignee-side + attachments).
+		ticketRoute := apiRouter.Group("/ticket")
+		ticketRoute.Use(middleware.UserAuth())
+		{
+			ticketRoute.GET("/", controller.ListMyTickets)
+			ticketRoute.POST("/", controller.CreateTicket)
+			ticketRoute.GET("/:id", controller.GetMyTicket)
+			ticketRoute.POST("/:id/reply", controller.ReplyMyTicket)
+			ticketRoute.POST("/:id/close", controller.CloseMyTicket)
+			ticketRoute.POST("/:id/escalate", controller.EscalateMyTicket)
+			ticketRoute.POST("/:id/attachment", middleware.TicketUploadLimit(), controller.UploadAttachment)
+			ticketRoute.GET("/:id/attachment/:aid", controller.GetAttachment)
+			ticketRoute.DELETE("/:id/attachment/:aid", controller.DeleteAttachment)
+		}
+
+		ticketAdminRoute := apiRouter.Group("/ticket_admin")
+		ticketAdminRoute.Use(middleware.UserAuth())
+		{
+			ticketAdminRoute.GET("/inbox", controller.ListAssigneeTickets)
+			ticketAdminRoute.GET("/downstream", controller.ListDownstreamTickets)
+			ticketAdminRoute.GET("/:id", controller.GetTicketAdmin)
+			ticketAdminRoute.POST("/:id/reply", controller.ReplyTicketAdmin)
+			ticketAdminRoute.POST("/:id/close", controller.CloseTicketAdmin)
+			ticketAdminRoute.POST("/:id/escalate", controller.EscalateTicketAdmin)
+			ticketAdminRoute.POST("/:id/assign", controller.AssignTicketAdmin)
+		}
+
 		vendorRoute := apiRouter.Group("/vendors")
 		vendorRoute.Use(middleware.AdminAuth())
 		{
