@@ -15,6 +15,8 @@ type Token struct {
 	Id                 int            `json:"id"`
 	UserId             int            `json:"user_id" gorm:"index"`
 	Key                string         `json:"key" gorm:"type:varchar(128);uniqueIndex"`
+	TenantId           int            `json:"tenant_id" gorm:"type:int;default:0;index"`
+	ResellerId         int            `json:"reseller_id" gorm:"type:int;default:0;index"`
 	Status             int            `json:"status" gorm:"default:1"`
 	Name               string         `json:"name" gorm:"index" `
 	CreatedTime        int64          `json:"created_time" gorm:"bigint"`

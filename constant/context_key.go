@@ -66,4 +66,12 @@ const (
 	// ContextKeyLanguage stores the user's language preference for i18n
 	ContextKeyLanguage ContextKey = "language"
 	ContextKeyIsStream ContextKey = "is_stream"
+
+	// SaaS white-label context keys
+	ContextKeyTenantId    ContextKey = "saas_tenant_id"
+	ContextKeyTenantCode  ContextKey = "saas_tenant_code"
+	ContextKeyResellerId  ContextKey = "saas_reseller_id"
+	ContextKeyActorRole   ContextKey = "saas_actor_role"
+	ContextKeyDataScope   ContextKey = "saas_data_scope"
+	ContextKeySaaSPriceQuote ContextKey = "saas_price_quote"
 )

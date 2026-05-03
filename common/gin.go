@@ -192,6 +192,10 @@ func ApiErrorMsg(c *gin.Context, msg string) {
 	})
 }
 
+func ApiErrorStr(c *gin.Context, msg string) {
+	ApiErrorMsg(c, msg)
+}
+
 func ApiSuccess(c *gin.Context, data any) {
 	c.JSON(http.StatusOK, gin.H{
 		"success": true,

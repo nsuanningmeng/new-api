@@ -12,6 +12,7 @@ import (
 	"time"
 
 	"github.com/QuantumNous/new-api/common"
+	"github.com/QuantumNous/new-api/constant"
 	"github.com/QuantumNous/new-api/model"
 
 	"github.com/gin-contrib/sessions"
@@ -45,6 +46,7 @@ func LinuxDoBind(c *gin.Context) {
 
 	user := model.User{
 		LinuxDOId: strconv.Itoa(linuxdoUser.Id),
+		TenantId:  c.GetInt(string(constant.ContextKeyTenantId)),
 	}
 
 	if model.IsLinuxDOIdAlreadyTaken(user.LinuxDOId) {
@@ -200,6 +202,7 @@ func LinuxdoOAuth(c *gin.Context) {
 
 	user := model.User{
 		LinuxDOId: strconv.Itoa(linuxdoUser.Id),
+		TenantId:  c.GetInt(string(constant.ContextKeyTenantId)),
 	}
 
 	// Check if user exists

@@ -1,11 +1,13 @@
 package controller
 
 import (
+	"errors"
 	"fmt"
 	"net/http"
 	"strconv"
 
 	"github.com/QuantumNous/new-api/common"
+	"github.com/QuantumNous/new-api/constant"
 	"github.com/QuantumNous/new-api/i18n"
 	"github.com/QuantumNous/new-api/model"
 	"github.com/QuantumNous/new-api/oauth"
@@ -195,9 +197,19 @@ func handleOAuthBind(c *gin.Context, provider oauth.Provider) {
 	})
 }
 
+func validateOAuthUserTenant(c *gin.Context, user *model.User) error {
+	tenantId := c.GetInt(string(constant.ContextKeyTenantId))
+	if tenantId > 0 && user.TenantId > 0 && user.TenantId != tenantId {
+		return errors.New("user does not belong to current tenant")
+	}
+	return nil
+}
+
 // findOrCreateOAuthUser finds existing user or creates new user
 func findOrCreateOAuthUser(c *gin.Context, provider oauth.Provider, oauthUser *oauth.OAuthUser, session sessions.Session) (*model.User, error) {
-	user := &model.User{}
+	user := &model.User{
+		TenantId: c.GetInt(string(constant.ContextKeyTenantId)),
+	}
 
 	// Check if user already exists with new ID
 	if provider.IsUserIDTaken(oauthUser.ProviderUserID) {
@@ -208,6 +220,9 @@ func findOrCreateOAuthUser(c *gin.Context, provider oauth.Provider, oauthUser *o
 		// Check if user has been deleted
 		if user.Id == 0 {
 			return nil, &OAuthUserDeletedError{}
+		}
+		if err := validateOAuthUserTenant(c, user); err != nil {
+			return nil, err
 		}
 		return user, nil
 	}
@@ -220,6 +235,9 @@ func findOrCreateOAuthUser(c *gin.Context, provider oauth.Provider, oauthUser *o
 				return nil, err
 			}
 			if user.Id != 0 {
+				if err := validateOAuthUserTenant(c, user); err != nil {
+					return nil, err
+				}
 				// Found user with legacy ID, migrate to new ID
 				common.SysLog(fmt.Sprintf("[OAuth] Migrating user %d from legacy_id=%s to new_id=%s",
 					user.Id, legacyID, oauthUser.ProviderUserID))

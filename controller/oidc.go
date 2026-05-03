@@ -11,6 +11,7 @@ import (
 	"time"
 
 	"github.com/QuantumNous/new-api/common"
+	"github.com/QuantumNous/new-api/constant"
 	"github.com/QuantumNous/new-api/model"
 	"github.com/QuantumNous/new-api/setting/system_setting"
 
@@ -130,7 +131,8 @@ func OidcAuth(c *gin.Context) {
 		return
 	}
 	user := model.User{
-		OidcId: oidcUser.OpenID,
+		OidcId:   oidcUser.OpenID,
+		TenantId: c.GetInt(string(constant.ContextKeyTenantId)),
 	}
 	if model.IsOidcIdAlreadyTaken(user.OidcId) {
 		err := user.FillUserByOidcId()
@@ -196,7 +198,8 @@ func OidcBind(c *gin.Context) {
 		return
 	}
 	user := model.User{
-		OidcId: oidcUser.OpenID,
+		OidcId:   oidcUser.OpenID,
+		TenantId: c.GetInt(string(constant.ContextKeyTenantId)),
 	}
 	if model.IsOidcIdAlreadyTaken(user.OidcId) {
 		c.JSON(http.StatusOK, gin.H{

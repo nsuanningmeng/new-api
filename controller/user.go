@@ -180,7 +180,8 @@ func Register(c *gin.Context) {
 		Password:    user.Password,
 		DisplayName: user.Username,
 		InviterId:   inviterId,
-		Role:        common.RoleCommonUser, // 明确设置角色为普通用户
+		Role:        common.RoleCommonUser,
+		TenantId:    c.GetInt(string(constant.ContextKeyTenantId)),
 	}
 	if common.EmailVerificationEnabled {
 		cleanUser.Email = user.Email
@@ -206,7 +207,9 @@ func Register(c *gin.Context) {
 		}
 		// 生成默认令牌
 		token := model.Token{
-			UserId:             insertedUser.Id, // 使用插入后的用户ID
+			UserId:             insertedUser.Id,
+			TenantId:           insertedUser.TenantId,
+			ResellerId:         insertedUser.ResellerId,
 			Name:               cleanUser.Username + "的初始令牌",
 			Key:                key,
 			CreatedTime:        common.GetTimestamp(),

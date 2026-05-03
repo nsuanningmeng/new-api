@@ -37,6 +37,16 @@ type Log struct {
 	Ip               string `json:"ip" gorm:"index;default:''"`
 	RequestId        string `json:"request_id,omitempty" gorm:"type:varchar(64);index:idx_logs_request_id;default:''"`
 	Other            string `json:"other"`
+	TenantId         int    `json:"tenant_id" gorm:"type:int;default:0;index"`
+	ResellerId       int    `json:"reseller_id" gorm:"type:int;default:0;index"`
+	PriceSnapshotId  int    `json:"price_snapshot_id" gorm:"type:int;default:0;index"`
+	PlatformCostSnapshot  int64 `json:"platform_cost_snapshot" gorm:"type:bigint;default:0"`
+	TenantPriceSnapshot   int64 `json:"tenant_price_snapshot" gorm:"type:bigint;default:0"`
+	ResellerPriceSnapshot int64 `json:"reseller_price_snapshot" gorm:"type:bigint;default:0"`
+	RetailPriceSnapshot   int64 `json:"retail_price_snapshot" gorm:"type:bigint;default:0"`
+	PlatformProfit        int64 `json:"platform_profit" gorm:"type:bigint;default:0"`
+	TenantProfit          int64 `json:"tenant_profit" gorm:"type:bigint;default:0"`
+	ResellerProfit        int64 `json:"reseller_profit" gorm:"type:bigint;default:0"`
 }
 
 // don't use iota, avoid change log type value
@@ -199,6 +209,17 @@ type RecordConsumeLogParams struct {
 	IsStream         bool                   `json:"is_stream"`
 	Group            string                 `json:"group"`
 	Other            map[string]interface{} `json:"other"`
+	// SaaS price snapshot fields
+	TenantId                int   `json:"tenant_id"`
+	ResellerId              int   `json:"reseller_id"`
+	PriceSnapshotId         int   `json:"price_snapshot_id"`
+	PlatformCostSnapshot    int64 `json:"platform_cost_snapshot"`
+	TenantPriceSnapshot     int64 `json:"tenant_price_snapshot"`
+	ResellerPriceSnapshot   int64 `json:"reseller_price_snapshot"`
+	RetailPriceSnapshot     int64 `json:"retail_price_snapshot"`
+	PlatformProfit          int64 `json:"platform_profit"`
+	TenantProfit            int64 `json:"tenant_profit"`
+	ResellerProfit          int64 `json:"reseller_profit"`
 }
 
 func RecordConsumeLog(c *gin.Context, userId int, params RecordConsumeLogParams) {
@@ -240,6 +261,16 @@ func RecordConsumeLog(c *gin.Context, userId int, params RecordConsumeLogParams)
 		}(),
 		RequestId: requestId,
 		Other:     otherStr,
+		TenantId:              params.TenantId,
+		ResellerId:            params.ResellerId,
+		PriceSnapshotId:       params.PriceSnapshotId,
+		PlatformCostSnapshot:  params.PlatformCostSnapshot,
+		TenantPriceSnapshot:   params.TenantPriceSnapshot,
+		ResellerPriceSnapshot: params.ResellerPriceSnapshot,
+		RetailPriceSnapshot:   params.RetailPriceSnapshot,
+		PlatformProfit:        params.PlatformProfit,
+		TenantProfit:          params.TenantProfit,
+		ResellerProfit:        params.ResellerProfit,
 	}
 	err := LOG_DB.Create(log).Error
 	if err != nil {

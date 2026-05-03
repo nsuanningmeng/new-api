@@ -3,6 +3,7 @@ package router
 import (
 	"github.com/QuantumNous/new-api/controller"
 	"github.com/QuantumNous/new-api/middleware"
+	"github.com/QuantumNous/new-api/service"
 
 	// Import oauth package to register providers via init()
 	_ "github.com/QuantumNous/new-api/oauth"
@@ -15,8 +16,9 @@ func SetApiRouter(router *gin.Engine) {
 	apiRouter := router.Group("/api")
 	apiRouter.Use(middleware.RouteTag("api"))
 	apiRouter.Use(gzip.Gzip(gzip.DefaultCompression))
-	apiRouter.Use(middleware.BodyStorageCleanup()) // 清理请求体存储
+	apiRouter.Use(middleware.BodyStorageCleanup())
 	apiRouter.Use(middleware.GlobalAPIRateLimit())
+	apiRouter.Use(middleware.TenantResolver())
 	{
 		apiRouter.GET("/setup", controller.GetSetup)
 		apiRouter.POST("/setup", controller.PostSetup)
@@ -378,6 +380,48 @@ func SetApiRouter(router *gin.Engine) {
 			deploymentsRoute.PUT("/:id/name", controller.UpdateDeploymentName)
 			deploymentsRoute.POST("/:id/extend", controller.ExtendDeployment)
 			deploymentsRoute.DELETE("/:id", controller.DeleteDeployment)
+		}
+
+		// SaaS platform admin routes
+		platformRoute := apiRouter.Group("/platform")
+		platformRoute.Use(middleware.RootAuth())
+		{
+			tenantRoute := platformRoute.Group("/tenant")
+			{
+				tenantRoute.GET("/", controller.GetTenants)
+				tenantRoute.GET("/:id", controller.GetTenant)
+				tenantRoute.POST("/", controller.CreateTenant)
+				tenantRoute.PUT("/:id", controller.UpdateTenant)
+				tenantRoute.DELETE("/:id", controller.DeleteTenant)
+				tenantRoute.GET("/:id/domains", controller.GetTenantDomains)
+				tenantRoute.POST("/:id/domains", controller.CreateTenantDomain)
+				tenantRoute.DELETE("/:id/domains/:domain_id", controller.DeleteTenantDomain)
+			}
+			priceRuleRoute := platformRoute.Group("/price_rule")
+			{
+				priceRuleRoute.GET("/", controller.GetPriceRules)
+				priceRuleRoute.POST("/", controller.CreatePriceRule)
+				priceRuleRoute.PUT("/:id", controller.UpdatePriceRule)
+				priceRuleRoute.DELETE("/:id", controller.DeletePriceRule)
+			}
+			platformWalletRoute := platformRoute.Group("/wallet")
+			{
+				platformWalletRoute.GET("/withdraw", controller.GetPlatformWithdrawOrders)
+				platformWalletRoute.PUT("/withdraw/:id/review", controller.ReviewPlatformWithdraw)
+			}
+		}
+
+		tenantAdminRoute := apiRouter.Group("/tenant_admin")
+		tenantAdminRoute.Use(middleware.UserAuth(), middleware.ScopeGuard(service.ActorRoleTenantAdmin))
+		{
+			tenantAdminRoute.GET("/reseller/", controller.GetResellers)
+			tenantAdminRoute.GET("/reseller/:id", controller.GetReseller)
+			tenantAdminRoute.POST("/reseller/", controller.CreateReseller)
+			tenantAdminRoute.PUT("/reseller/:id", controller.UpdateReseller)
+			tenantAdminRoute.DELETE("/reseller/:id", controller.DeleteReseller)
+			tenantAdminRoute.GET("/wallet/", controller.GetTenantWallet)
+			tenantAdminRoute.GET("/wallet/ledger", controller.GetTenantWalletLedger)
+			tenantAdminRoute.POST("/withdraw/", controller.CreateTenantWithdraw)
 		}
 	}
 }

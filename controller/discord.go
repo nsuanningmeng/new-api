@@ -11,6 +11,7 @@ import (
 	"time"
 
 	"github.com/QuantumNous/new-api/common"
+	"github.com/QuantumNous/new-api/constant"
 	"github.com/QuantumNous/new-api/model"
 	"github.com/QuantumNous/new-api/setting/system_setting"
 
@@ -129,14 +130,16 @@ func DiscordOAuth(c *gin.Context) {
 	}
 	user := model.User{
 		DiscordId: discordUser.UID,
+		TenantId:  c.GetInt(string(constant.ContextKeyTenantId)),
 	}
 	if model.IsDiscordIdAlreadyTaken(user.DiscordId) {
 		err := user.FillUserByDiscordId()
 		if err != nil {
-			c.JSON(http.StatusOK, gin.H{
-				"success": false,
-				"message": err.Error(),
-			})
+			c.JSON(http.StatusOK, gin.H{"success": false, "message": err.Error()})
+			return
+		}
+		if err := validateOAuthUserTenant(c, &user); err != nil {
+			c.JSON(http.StatusOK, gin.H{"success": false, "message": err.Error()})
 			return
 		}
 	} else {
@@ -194,6 +197,7 @@ func DiscordBind(c *gin.Context) {
 	}
 	user := model.User{
 		DiscordId: discordUser.UID,
+		TenantId:  c.GetInt(string(constant.ContextKeyTenantId)),
 	}
 	if model.IsDiscordIdAlreadyTaken(user.DiscordId) {
 		c.JSON(http.StatusOK, gin.H{

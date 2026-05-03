@@ -14,6 +14,8 @@ import (
 type TopUp struct {
 	Id              int     `json:"id"`
 	UserId          int     `json:"user_id" gorm:"index"`
+	TenantId        int     `json:"tenant_id" gorm:"type:int;default:0;index"`
+	ResellerId      int     `json:"reseller_id" gorm:"type:int;default:0;index"`
 	Amount          int64   `json:"amount"`
 	Money           float64 `json:"money"`
 	TradeNo         string  `json:"trade_no" gorm:"unique;type:varchar(255);index"`

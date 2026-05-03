@@ -207,8 +207,16 @@ func AddToken(c *gin.Context) {
 		common.SysLog("failed to generate token key: " + err.Error())
 		return
 	}
+	userId := c.GetInt("id")
+	var tokenOwner model.User
+	if err := model.DB.Select("tenant_id", "reseller_id").First(&tokenOwner, userId).Error; err != nil {
+		common.ApiError(c, err)
+		return
+	}
 	cleanToken := model.Token{
-		UserId:             c.GetInt("id"),
+		UserId:             userId,
+		TenantId:           tokenOwner.TenantId,
+		ResellerId:         tokenOwner.ResellerId,
 		Name:               token.Name,
 		Key:                key,
 		CreatedTime:        common.GetTimestamp(),

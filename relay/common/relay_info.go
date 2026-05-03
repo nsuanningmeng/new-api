@@ -84,6 +84,17 @@ type TokenCountMeta struct {
 	estimatePromptTokens int
 }
 
+type SaaSPriceQuote struct {
+	TenantId                int
+	ResellerId              int
+	PriceRuleIds            []int
+	PlatformCostQuota       int64
+	TenantSettlementQuota   int64
+	ResellerSettlementQuota int64
+	RetailPriceQuota        int64
+	Currency                string
+}
+
 type RelayInfo struct {
 	TokenId           int
 	TokenKey          string
@@ -154,6 +165,19 @@ type RelayInfo struct {
 	ParamOverrideAudit                    []string
 
 	PriceData types.PriceData
+
+	// SaaS white-label price quote, injected by PriceResolver middleware
+	SaaSPriceQuote *SaaSPriceQuote
+
+	// SaaS settlement snapshot fields, filled after successful quota settlement.
+	SaaSPriceSnapshotId       int
+	SaaSPlatformCostSnapshot  int64
+	SaaSTenantPriceSnapshot   int64
+	SaaSResellerPriceSnapshot int64
+	SaaSRetailPriceSnapshot   int64
+	SaaSPlatformProfit        int64
+	SaaSTenantProfit          int64
+	SaaSResellerProfit        int64
 
 	// TieredBillingSnapshot is a frozen snapshot of tiered billing rules
 	// captured at pre-consume time. Non-nil only when billing mode is "tiered_expr".
@@ -500,6 +524,10 @@ func genBaseRelayInfo(c *gin.Context, request dto.Request) *RelayInfo {
 	userSetting, ok := common.GetContextKeyType[dto.UserSetting](c, constant.ContextKeyUserSetting)
 	if ok {
 		info.UserSetting = userSetting
+	}
+
+	if quote, ok := common.GetContextKeyType[*SaaSPriceQuote](c, constant.ContextKeySaaSPriceQuote); ok && quote != nil {
+		info.SaaSPriceQuote = quote
 	}
 
 	return info

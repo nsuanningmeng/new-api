@@ -9,6 +9,7 @@ import (
 	"sort"
 
 	"github.com/QuantumNous/new-api/common"
+	"github.com/QuantumNous/new-api/constant"
 	"github.com/QuantumNous/new-api/model"
 
 	"github.com/gin-contrib/sessions"
@@ -89,10 +90,13 @@ func TelegramLogin(c *gin.Context) {
 	telegramId := params["id"][0]
 	user := model.User{TelegramId: telegramId}
 	if err := user.FillUserByTelegramId(); err != nil {
-		c.JSON(200, gin.H{
-			"message": err.Error(),
-			"success": false,
-		})
+		c.JSON(200, gin.H{"message": err.Error(), "success": false})
+		return
+	}
+	// tenant isolation: reject login if user belongs to a different tenant
+	tenantId := c.GetInt(string(constant.ContextKeyTenantId))
+	if tenantId > 0 && user.TenantId != tenantId {
+		c.JSON(200, gin.H{"message": "user does not belong to current tenant", "success": false})
 		return
 	}
 	setupLogin(&user, c)

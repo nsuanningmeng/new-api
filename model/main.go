@@ -22,6 +22,9 @@ var commonKeyCol string
 var commonTrueVal string
 var commonFalseVal string
 
+// PriceRuleGroupCol returns the properly quoted "group" column name for the current DB.
+func PriceRuleGroupCol() string { return commonGroupCol }
+
 var logKeyCol string
 var logGroupCol string
 
@@ -280,6 +283,17 @@ func migrateDB() error {
 		&SubscriptionPreConsumeRecord{},
 		&CustomOAuthProvider{},
 		&UserOAuthBinding{},
+		&Tenant{},
+		&TenantDomain{},
+		&TenantSetting{},
+		&Reseller{},
+		&WalletAccount{},
+		&WalletLedger{},
+		&PriceRule{},
+		&PriceSnapshot{},
+		&RechargeOrder{},
+		&WithdrawOrder{},
+		&ProfitLedger{},
 	)
 	if err != nil {
 		return err
@@ -328,6 +342,17 @@ func migrateDBFast() error {
 		{&SubscriptionPreConsumeRecord{}, "SubscriptionPreConsumeRecord"},
 		{&CustomOAuthProvider{}, "CustomOAuthProvider"},
 		{&UserOAuthBinding{}, "UserOAuthBinding"},
+		{&Tenant{}, "Tenant"},
+		{&TenantDomain{}, "TenantDomain"},
+		{&TenantSetting{}, "TenantSetting"},
+		{&Reseller{}, "Reseller"},
+		{&WalletAccount{}, "WalletAccount"},
+		{&WalletLedger{}, "WalletLedger"},
+		{&PriceRule{}, "PriceRule"},
+		{&PriceSnapshot{}, "PriceSnapshot"},
+		{&RechargeOrder{}, "RechargeOrder"},
+		{&WithdrawOrder{}, "WithdrawOrder"},
+		{&ProfitLedger{}, "ProfitLedger"},
 	}
 	// 动态计算migration数量，确保errChan缓冲区足够大
 	errChan := make(chan error, len(migrations))
