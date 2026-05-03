@@ -30,6 +30,7 @@ type Token struct {
 	UsedQuota          int            `json:"used_quota" gorm:"default:0"` // used quota
 	Group              string         `json:"group" gorm:"default:''"`
 	CrossGroupRetry    bool           `json:"cross_group_retry"` // 跨分组重试，仅auto分组有效
+	GroupList          string         `json:"group_list" gorm:"type:text"`
 	DeletedAt          gorm.DeletedAt `gorm:"index"`
 }
 
@@ -78,6 +79,25 @@ func (token *Token) GetIpLimits() []string {
 		}
 	}
 	return ipLimits
+}
+
+func (token *Token) GetGroupList() []string {
+	groupList := strings.TrimSpace(token.GroupList)
+	if groupList == "" {
+		return nil
+	}
+	groups := strings.Split(groupList, ",")
+	cleanGroups := make([]string, 0, len(groups))
+	for _, group := range groups {
+		group = strings.TrimSpace(group)
+		if group != "" {
+			cleanGroups = append(cleanGroups, group)
+		}
+	}
+	if len(cleanGroups) == 0 {
+		return nil
+	}
+	return cleanGroups
 }
 
 func GetAllUserTokens(userId int, startIdx int, num int) ([]*Token, error) {
@@ -297,7 +317,7 @@ func (token *Token) Update() (err error) {
 		}
 	}()
 	err = DB.Model(token).Select("name", "status", "expired_time", "remain_quota", "unlimited_quota",
-		"model_limits_enabled", "model_limits", "allow_ips", "group", "cross_group_retry").Updates(token).Error
+		"model_limits_enabled", "model_limits", "allow_ips", "group", "cross_group_retry", "group_list").Updates(token).Error
 	return err
 }
 

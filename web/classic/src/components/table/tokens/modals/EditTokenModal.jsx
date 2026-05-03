@@ -59,6 +59,42 @@ import { StatusContext } from '../../../../context/Status';
 
 const { Text, Title } = Typography;
 
+const DraggableGroupList = ({ groups, groupOptions, onReorder }) => {
+  const dragIndexRef = useRef(null);
+  if (!groups || groups.length < 2) return null;
+  const handleDragOver = (e, index) => {
+    e.preventDefault();
+    const from = dragIndexRef.current;
+    if (from === null || from === index) return;
+    const next = [...groups];
+    const [item] = next.splice(from, 1);
+    next.splice(index, 0, item);
+    dragIndexRef.current = index;
+    onReorder(next);
+  };
+  return (
+    <div style={{ marginTop: 6 }}>
+      {groups.map((g, i) => {
+        const opt = groupOptions.find((o) => o.value === g);
+        return (
+          <div
+            key={`${g}-${i}`}
+            draggable
+            onDragStart={() => { dragIndexRef.current = i; }}
+            onDragOver={(e) => handleDragOver(e, i)}
+            onDragEnd={() => { dragIndexRef.current = null; }}
+            style={{ display: 'flex', alignItems: 'center', gap: 8, padding: '4px 8px', marginBottom: 4, background: 'var(--semi-color-fill-0)', borderRadius: 6, cursor: 'grab', userSelect: 'none' }}
+          >
+            <span style={{ color: 'var(--semi-color-text-2)' }}>⠿</span>
+            <Tag size='small' color='blue'>{i + 1}</Tag>
+            <span style={{ fontSize: 13 }}>{opt?.label || g}</span>
+          </div>
+        );
+      })}
+    </div>
+  );
+};
+
 const EditTokenModal = (props) => {
   const { t } = useTranslation();
   const [statusState, statusDispatch] = useContext(StatusContext);
@@ -79,7 +115,7 @@ const EditTokenModal = (props) => {
     model_limits_enabled: false,
     model_limits: [],
     allow_ips: '',
-    group: '',
+    group: [],
     cross_group_retry: false,
     tokenCount: 1,
   });
@@ -169,6 +205,13 @@ const EditTokenModal = (props) => {
       } else {
         data.model_limits = [];
       }
+      if (data.group === 'ordered') {
+        data.group = data.group_list ? data.group_list.split(',') : [];
+      } else if (data.group && data.group !== 'ordered') {
+        data.group = [data.group];
+      } else {
+        data.group = [];
+      }
       data.remain_amount = Number(
         quotaToDisplayAmount(data.remain_quota || 0).toFixed(6),
       );
@@ -238,6 +281,9 @@ const EditTokenModal = (props) => {
       }
       localInputs.model_limits = localInputs.model_limits.join(',');
       localInputs.model_limits_enabled = localInputs.model_limits.length > 0;
+      const groupArr = Array.isArray(localInputs.group) ? localInputs.group : (localInputs.group ? [localInputs.group] : []);
+      if (groupArr.length > 1) { localInputs.group_list = groupArr.join(','); localInputs.group = 'ordered'; }
+      else { localInputs.group = groupArr[0] || ''; localInputs.group_list = ''; }
       let res = await API.put(`/api/token/`, {
         ...localInputs,
         id: parseInt(props.editingToken.id),
@@ -282,6 +328,9 @@ const EditTokenModal = (props) => {
         }
         localInputs.model_limits = localInputs.model_limits.join(',');
         localInputs.model_limits_enabled = localInputs.model_limits.length > 0;
+        const groupArr2 = Array.isArray(localInputs.group) ? localInputs.group : (localInputs.group ? [localInputs.group] : []);
+        if (groupArr2.length > 1) { localInputs.group_list = groupArr2.join(','); localInputs.group = 'ordered'; }
+        else { localInputs.group = groupArr2[0] || ''; localInputs.group_list = ''; }
         let res = await API.post(`/api/token/`, localInputs);
         const { success, message } = res.data;
         if (success) {
@@ -384,23 +433,31 @@ const EditTokenModal = (props) => {
                   </Col>
                   <Col span={24}>
                     {groups.length > 0 ? (
-                      <Form.Select
-                        field='group'
-                        label={t('令牌分组')}
-                        placeholder={t('令牌分组，默认为用户的分组')}
-                        optionList={groups}
-                        renderOptionItem={renderGroupOption}
-                        filter={(input, option) => {
-                          const q = input.toLowerCase();
-                          return (
-                            option.value?.toLowerCase().includes(q) ||
-                            (typeof option.label === 'string' &&
-                              option.label.toLowerCase().includes(q))
-                          );
-                        }}
-                        showClear
-                        style={{ width: '100%' }}
-                      />
+                      <>
+                        <Form.Select
+                          field='group'
+                          label={t('令牌分组')}
+                          placeholder={t('可多选，按优先级排序，拖拽调整顺序')}
+                          optionList={groups}
+                          renderOptionItem={renderGroupOption}
+                          multiple
+                          filter={(input, option) => {
+                            const q = input.toLowerCase();
+                            return (
+                              option.value?.toLowerCase().includes(q) ||
+                              (typeof option.label === 'string' &&
+                                option.label.toLowerCase().includes(q))
+                            );
+                          }}
+                          showClear
+                          style={{ width: '100%' }}
+                        />
+                        <DraggableGroupList
+                          groups={values.group || []}
+                          groupOptions={groups}
+                          onReorder={(next) => formApiRef.current?.setValue('group', next)}
+                        />
+                      </>
                     ) : (
                       <Form.Select
                         placeholder={t('管理员未设置用户可选分组')}
@@ -413,7 +470,7 @@ const EditTokenModal = (props) => {
                   <Col
                     span={24}
                     style={{
-                      display: values.group === 'auto' ? 'block' : 'none',
+                      display: Array.isArray(values.group) && values.group.length === 1 && values.group[0] === 'auto' ? 'block' : 'none',
                     }}
                   >
                     <Form.Switch

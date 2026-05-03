@@ -229,6 +229,17 @@ func AddToken(c *gin.Context) {
 		AllowIps:           token.AllowIps,
 		Group:              token.Group,
 		CrossGroupRetry:    token.CrossGroupRetry,
+		GroupList:          token.GroupList,
+	}
+	parsedGroups := cleanToken.GetGroupList()
+	if len(parsedGroups) > 0 {
+		cleanToken.Group = "ordered"
+		cleanToken.GroupList = strings.Join(parsedGroups, ",")
+	} else if token.Group == "ordered" {
+		c.JSON(http.StatusOK, gin.H{"success": false, "message": "ordered 分组需要指定有效的 group_list"})
+		return
+	} else {
+		cleanToken.GroupList = ""
 	}
 	err = cleanToken.Insert()
 	if err != nil {
@@ -307,6 +318,17 @@ func UpdateToken(c *gin.Context) {
 		cleanToken.AllowIps = token.AllowIps
 		cleanToken.Group = token.Group
 		cleanToken.CrossGroupRetry = token.CrossGroupRetry
+		cleanToken.GroupList = token.GroupList
+		parsedGroups2 := cleanToken.GetGroupList()
+		if len(parsedGroups2) > 0 {
+			cleanToken.Group = "ordered"
+			cleanToken.GroupList = strings.Join(parsedGroups2, ",")
+		} else if token.Group == "ordered" {
+			c.JSON(http.StatusOK, gin.H{"success": false, "message": "ordered 分组需要指定有效的 group_list"})
+			return
+		} else {
+			cleanToken.GroupList = ""
+		}
 	}
 	err = cleanToken.Update()
 	if err != nil {

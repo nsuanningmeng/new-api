@@ -152,6 +152,53 @@ func CacheGetRandomSatisfiedChannel(param *RetryParam) (*model.Channel, string, 
 			}
 			break
 		}
+	} else if param.TokenGroup == "ordered" {
+		orderedGroups := common.GetContextKeyStringSlice(param.Ctx, constant.ContextKeyTokenGroupList)
+		if len(orderedGroups) == 0 {
+			return nil, selectGroup, errors.New("ordered groups is empty")
+		}
+
+		startGroupIndex := 0
+
+		if lastGroupIndex, exists := common.GetContextKey(param.Ctx, constant.ContextKeyAutoGroupIndex); exists {
+			if idx, ok := lastGroupIndex.(int); ok {
+				startGroupIndex = idx
+			}
+		}
+
+		for i := startGroupIndex; i < len(orderedGroups); i++ {
+			orderedGroup := orderedGroups[i]
+			priorityRetry := param.GetRetry()
+			if i > startGroupIndex {
+				priorityRetry = 0
+			}
+			logger.LogDebug(param.Ctx, "Ordered selecting group: %s, priorityRetry: %d", orderedGroup, priorityRetry)
+
+			channel, err = model.GetRandomSatisfiedChannel(orderedGroup, param.ModelName, priorityRetry)
+			if channel == nil {
+				if err != nil {
+					logger.LogError(param.Ctx, "Error getting channel in ordered group %s: %v", orderedGroup, err)
+				}
+				logger.LogDebug(param.Ctx, "No available channel in ordered group %s for model %s at priorityRetry %d, trying next group", orderedGroup, param.ModelName, priorityRetry)
+				common.SetContextKey(param.Ctx, constant.ContextKeyAutoGroupIndex, i+1)
+				common.SetContextKey(param.Ctx, constant.ContextKeyAutoGroupRetryIndex, 0)
+				param.SetRetry(0)
+				continue
+			}
+			common.SetContextKey(param.Ctx, constant.ContextKeyAutoGroup, orderedGroup)
+			selectGroup = orderedGroup
+			logger.LogDebug(param.Ctx, "Ordered selected group: %s", orderedGroup)
+
+			if priorityRetry >= common.RetryTimes {
+				logger.LogDebug(param.Ctx, "Current ordered group %s retries exhausted (priorityRetry=%d >= RetryTimes=%d), preparing switch to next group for next retry", orderedGroup, priorityRetry, common.RetryTimes)
+				common.SetContextKey(param.Ctx, constant.ContextKeyAutoGroupIndex, i+1)
+				param.SetRetry(0)
+				param.ResetRetryNextTry()
+			} else {
+				common.SetContextKey(param.Ctx, constant.ContextKeyAutoGroupIndex, i)
+			}
+			break
+		}
 	} else {
 		channel, err = model.GetRandomSatisfiedChannel(param.TokenGroup, param.ModelName, param.GetRetry())
 		if err != nil {
