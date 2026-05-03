@@ -2,6 +2,7 @@ package service
 
 import (
 	"context"
+	"crypto/sha1"
 	"fmt"
 	"strings"
 
@@ -86,15 +87,29 @@ func taskIsSubscription(task *model.Task) bool {
 	return task.PrivateData.BillingSource == BillingSourceSubscription && task.PrivateData.SubscriptionId > 0
 }
 
+// taskWalletAdjustmentKey 生成任务差额结算的幂等键，确保 task_id+reason+delta方向 重放只入账一次。
+func taskWalletAdjustmentKey(taskID, reason string, delta int) string {
+	direction := model.WalletLedgerDirectionDebit
+	if delta < 0 {
+		direction = model.WalletLedgerDirectionCredit
+	}
+	sum := sha1.Sum([]byte(fmt.Sprintf("%s:%s:%s:%d", taskID, reason, direction, delta)))
+	return fmt.Sprintf("task:%s:%x", direction, sum)
+}
+
 // taskAdjustFunding 调整任务的资金来源（钱包或订阅），delta > 0 表示扣费，delta < 0 表示退还。
-func taskAdjustFunding(task *model.Task, delta int) error {
+// 钱包路径走 AdjustUserWalletQuota，统一写 wallet_ledgers + 更新 wallet_accounts.balance + users.quota，
+// 替代旧的 DecreaseUserQuota/IncreaseUserQuota 直接更新 users.quota（绕过 ledger）。
+func taskAdjustFunding(task *model.Task, delta int, reason string) error {
 	if taskIsSubscription(task) {
 		return model.PostConsumeUserSubscriptionDelta(task.PrivateData.SubscriptionId, int64(delta))
 	}
+	ledgerType := model.WalletLedgerTypeRefund
 	if delta > 0 {
-		return model.DecreaseUserQuota(task.UserId, delta, false)
+		ledgerType = model.WalletLedgerTypeConsume
 	}
-	return model.IncreaseUserQuota(task.UserId, -delta, false)
+	return AdjustUserWalletQuota(model.DB, task.UserId, int64(delta), ledgerType, "task", task.TaskID, "",
+		taskWalletAdjustmentKey(task.TaskID, reason, delta), reason)
 }
 
 // taskAdjustTokenQuota 调整任务的令牌额度，delta > 0 表示扣费，delta < 0 表示退还。
@@ -158,7 +173,7 @@ func RefundTaskQuota(ctx context.Context, task *model.Task, reason string) {
 	}
 
 	// 1. 退还资金来源（钱包或订阅）
-	if err := taskAdjustFunding(task, -quota); err != nil {
+	if err := taskAdjustFunding(task, -quota, reason); err != nil {
 		logger.LogWarn(ctx, fmt.Sprintf("退还资金来源失败 task %s: %s", task.TaskID, err.Error()))
 		return
 	}
@@ -208,7 +223,7 @@ func RecalculateTaskQuota(ctx context.Context, task *model.Task, actualQuota int
 	))
 
 	// 调整资金来源
-	if err := taskAdjustFunding(task, quotaDelta); err != nil {
+	if err := taskAdjustFunding(task, quotaDelta, reason); err != nil {
 		logger.LogError(ctx, fmt.Sprintf("差额结算资金调整失败 task %s: %s", task.TaskID, err.Error()))
 		return
 	}

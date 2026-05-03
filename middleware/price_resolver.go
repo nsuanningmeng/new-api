@@ -2,6 +2,7 @@ package middleware
 
 import (
 	"fmt"
+	"net/http"
 
 	"github.com/QuantumNous/new-api/common"
 	"github.com/QuantumNous/new-api/constant"
@@ -21,8 +22,12 @@ func PriceResolver() gin.HandlerFunc {
 
 		tenantId, resellerId = completeSaaSContextFromUser(userId, tenantId, resellerId)
 		if tenantId == -1 {
-			// user belongs to a different tenant than the host — skip SaaS pricing
-			c.Next()
+			// user belongs to a different tenant than the host — fail-closed instead of letting relay through.
+			// 之前是 c.Next() 放行，导致跨租户 token 在错误域名下也能走 relay；改为 403 abort。
+			c.AbortWithStatusJSON(http.StatusForbidden, gin.H{
+				"success": false,
+				"message": "tenant mismatch",
+			})
 			return
 		}
 

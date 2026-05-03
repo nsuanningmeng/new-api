@@ -6,6 +6,7 @@ import (
 	"strings"
 
 	"github.com/QuantumNous/new-api/common"
+	"github.com/QuantumNous/new-api/logger"
 	"github.com/QuantumNous/new-api/model"
 	"github.com/shopspring/decimal"
 	"gorm.io/gorm"
@@ -381,4 +382,51 @@ func CompleteTopUpRecharge(tradeNo, expectedProvider, actualPaymentMethod, strip
 		return nil, err
 	}
 	return result, nil
+}
+
+// AdjustUserWalletQuota 把任意 delta 同步到 wallet_ledgers + wallet_accounts.balance + users.quota。
+// delta > 0 表示扣费（DebitWallet），delta < 0 表示退款/补回（CreditWallet）。
+// idempotencyKey 由调用方保证全局唯一（同 key 重放只产生一条 ledger 与一次余额变化）。
+func AdjustUserWalletQuota(tx *gorm.DB, userId int, delta int64, ledgerType, refType, refId, requestId, idempotencyKey, remark string) error {
+	if delta == 0 {
+		return nil
+	}
+	err := walletTx(tx, func(db *gorm.DB) error {
+		account, err := GetOrCreateWalletAccount(db, model.WalletAccountTypeUser, userId, "USD")
+		if err != nil {
+			return err
+		}
+		if delta > 0 {
+			if err := DebitWallet(db, account.Id, delta, ledgerType, refType, refId, requestId, idempotencyKey, remark); err != nil {
+				return err
+			}
+			return db.Model(&model.User{}).Where("id = ?", userId).Update("quota", gorm.Expr("quota - ?", delta)).Error
+		}
+		amount := -delta
+		if err := CreditWallet(db, account.Id, amount, ledgerType, refType, refId, requestId, idempotencyKey, remark); err != nil {
+			return err
+		}
+		return db.Model(&model.User{}).Where("id = ?", userId).Update("quota", gorm.Expr("quota + ?", amount)).Error
+	})
+	if err == nil {
+		_ = model.InvalidateUserCache(userId)
+	}
+	return err
+}
+
+// ManualCompleteTopUp 是 controller 调用的管理员补单入口，在事务内完成 topup→users.quota→wallet_ledger。
+// 对 model.ManualCompleteTopUp 的替代：旧路径只 update users.quota 不写 ledger，违反 ledger 红线。
+func ManualCompleteTopUp(tradeNo, callerIp string) error {
+	result, err := CompleteTopUpRecharge(tradeNo, "", "", "", "")
+	if err != nil {
+		return err
+	}
+	if result.AlreadyCompleted {
+		return nil
+	}
+	model.RecordTopupLog(result.UserId,
+		fmt.Sprintf("管理员补单成功，充值金额 %s，支付金额：%f",
+			logger.FormatQuota(int(result.Quota)), result.Money),
+		callerIp, result.PaymentMethod, "admin")
+	return nil
 }
