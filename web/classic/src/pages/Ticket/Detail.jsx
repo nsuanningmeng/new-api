@@ -23,7 +23,7 @@ import {
 } from '@douyinfe/semi-ui';
 import {
   IconUser,
-  IconCustomerService,
+  IconCustomerSupport,
   IconSetting,
   IconPlus,
   IconDelete,
@@ -315,7 +315,7 @@ const TicketDetail = () => {
                 }}
               >
                 <Avatar size='small' color={item.is_system ? 'orange' : item.is_admin ? 'blue' : 'green'}>
-                  {item.is_system ? <IconSetting /> : item.is_admin ? <IconCustomerService /> : <IconUser />}
+                  {item.is_system ? <IconSetting /> : item.is_admin ? <IconCustomerSupport /> : <IconUser />}
                 </Avatar>
                 <div style={{ maxWidth: '80%' }}>
                   <div

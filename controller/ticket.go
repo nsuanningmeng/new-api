@@ -65,7 +65,7 @@ func CreateTicket(c *gin.Context) {
 		respondTicketError(c, err)
 		return
 	}
-	c.JSON(http.StatusOK, gin.H{"success": true, "message": "", "data": dto.ToTicketDTO(ticket)})
+	c.JSON(http.StatusOK, gin.H{"success": true, "message": "", "data": toTicketDTO(ticket)})
 }
 
 func GetMyTicket(c *gin.Context) {
@@ -299,7 +299,7 @@ func getTicketDetail(c *gin.Context) {
 		return
 	}
 
-	c.JSON(http.StatusOK, gin.H{"success": true, "message": "", "data": dto.ToTicketDetailDTO(ticket, replies, attachments)})
+	c.JSON(http.StatusOK, gin.H{"success": true, "message": "", "data": toTicketDetailDTO(ticket, replies, attachments)})
 }
 
 func replyTicket(c *gin.Context) {
@@ -325,7 +325,7 @@ func replyTicket(c *gin.Context) {
 		respondTicketError(c, err)
 		return
 	}
-	c.JSON(http.StatusOK, gin.H{"success": true, "message": "", "data": dto.ToTicketReplyDTO(reply)})
+	c.JSON(http.StatusOK, gin.H{"success": true, "message": "", "data": toTicketReplyDTO(reply)})
 }
 
 func closeTicket(c *gin.Context) {
@@ -452,7 +452,7 @@ func normalizeTicketQuery(query *dto.ListTicketsQuery) {
 func ticketListResponse(tickets []model.Ticket, total int64, query dto.ListTicketsQuery) dto.TicketListResponse {
 	items := make([]dto.TicketDTO, 0, len(tickets))
 	for i := range tickets {
-		items = append(items, dto.ToTicketDTO(&tickets[i]))
+		items = append(items, toTicketDTO(&tickets[i]))
 	}
 	return dto.TicketListResponse{
 		Items:    items,
@@ -478,6 +478,64 @@ func ticketAttachmentDTO(a *model.TicketAttachment) dto.TicketAttachmentMetaDTO 
 		Sha256:    a.Sha256,
 		CreatedAt: a.CreatedAt,
 		Url:       fmt.Sprintf("/api/ticket/%d/attachment/%d", a.TicketId, a.Id),
+	}
+}
+
+// toTicketDTO 等三个转换函数原本在 dto 包内，因为 dto ↔ model 会导致 import cycle，
+// 移到这里（controller 已同时 import 两边）。
+func toTicketDTO(t *model.Ticket) dto.TicketDTO {
+	if t == nil {
+		return dto.TicketDTO{}
+	}
+	return dto.TicketDTO{
+		Id:              t.Id,
+		UserId:          t.UserId,
+		TenantId:        t.TenantId,
+		ResellerId:      t.ResellerId,
+		Status:          t.Status,
+		Priority:        t.Priority,
+		Subject:         t.Subject,
+		Content:         t.Content,
+		Category:        t.Category,
+		AssigneeRole:    t.AssigneeRole,
+		AssigneeLevel:   t.AssigneeLevel,
+		EscalatedAt:     t.EscalatedAt,
+		EscalatedFrom:   t.EscalatedFrom,
+		EscalateCount:   t.EscalateCount,
+		LastReplyAt:     t.LastReplyAt,
+		AttachmentCount: t.AttachmentCount,
+		CreatedAt:       t.CreatedAt,
+		UpdatedAt:       t.UpdatedAt,
+		ClosedAt:        t.ClosedAt,
+		ClosedBy:        t.ClosedBy,
+	}
+}
+
+func toTicketReplyDTO(r *model.TicketReply) dto.TicketReplyDTO {
+	if r == nil {
+		return dto.TicketReplyDTO{}
+	}
+	return dto.TicketReplyDTO{
+		Id:        r.Id,
+		TicketId:  r.TicketId,
+		UserId:    r.UserId,
+		IsAdmin:   r.IsAdmin,
+		ActorRole: r.ActorRole,
+		IsSystem:  r.IsSystem,
+		Content:   r.Content,
+		CreatedAt: r.CreatedAt,
+	}
+}
+
+func toTicketDetailDTO(t *model.Ticket, replies []model.TicketReply, attachments []dto.TicketAttachmentMetaDTO) dto.TicketDetailDTO {
+	replyDTOs := make([]dto.TicketReplyDTO, 0, len(replies))
+	for i := range replies {
+		replyDTOs = append(replyDTOs, toTicketReplyDTO(&replies[i]))
+	}
+	return dto.TicketDetailDTO{
+		TicketDTO:   toTicketDTO(t),
+		Replies:     replyDTOs,
+		Attachments: attachments,
 	}
 }
 

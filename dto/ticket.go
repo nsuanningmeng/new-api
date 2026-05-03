@@ -1,6 +1,8 @@
 package dto
 
-import "github.com/QuantumNous/new-api/model"
+// 注：ToTicketDTO / ToTicketReplyDTO / ToTicketDetailDTO 三个转换函数原本定义在这里，
+// 但因为 model 包已 import dto（model.User.GetSetting() 返回 dto.UserSetting），
+// dto 反向 import model 会导致 import cycle。所以转换函数被移到 controller/ticket.go。
 
 type CreateTicketRequest struct {
 	Subject          string `json:"subject" binding:"required,max=255"`
@@ -88,58 +90,3 @@ type TicketListResponse struct {
 	PageSize int         `json:"page_size"`
 }
 
-func ToTicketDTO(t *model.Ticket) TicketDTO {
-	if t == nil {
-		return TicketDTO{}
-	}
-	return TicketDTO{
-		Id:              t.Id,
-		UserId:          t.UserId,
-		TenantId:        t.TenantId,
-		ResellerId:      t.ResellerId,
-		Status:          t.Status,
-		Priority:        t.Priority,
-		Subject:         t.Subject,
-		Content:         t.Content,
-		Category:        t.Category,
-		AssigneeRole:    t.AssigneeRole,
-		AssigneeLevel:   t.AssigneeLevel,
-		EscalatedAt:     t.EscalatedAt,
-		EscalatedFrom:   t.EscalatedFrom,
-		EscalateCount:   t.EscalateCount,
-		LastReplyAt:     t.LastReplyAt,
-		AttachmentCount: t.AttachmentCount,
-		CreatedAt:       t.CreatedAt,
-		UpdatedAt:       t.UpdatedAt,
-		ClosedAt:        t.ClosedAt,
-		ClosedBy:        t.ClosedBy,
-	}
-}
-
-func ToTicketReplyDTO(r *model.TicketReply) TicketReplyDTO {
-	if r == nil {
-		return TicketReplyDTO{}
-	}
-	return TicketReplyDTO{
-		Id:        r.Id,
-		TicketId:  r.TicketId,
-		UserId:    r.UserId,
-		IsAdmin:   r.IsAdmin,
-		ActorRole: r.ActorRole,
-		IsSystem:  r.IsSystem,
-		Content:   r.Content,
-		CreatedAt: r.CreatedAt,
-	}
-}
-
-func ToTicketDetailDTO(t *model.Ticket, replies []model.TicketReply, attachments []TicketAttachmentMetaDTO) TicketDetailDTO {
-	replyDTOs := make([]TicketReplyDTO, 0, len(replies))
-	for i := range replies {
-		replyDTOs = append(replyDTOs, ToTicketReplyDTO(&replies[i]))
-	}
-	return TicketDetailDTO{
-		TicketDTO:   ToTicketDTO(t),
-		Replies:     replyDTOs,
-		Attachments: attachments,
-	}
-}
