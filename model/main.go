@@ -296,6 +296,9 @@ func migrateDB() error {
 		&RechargeOrder{},
 		&WithdrawOrder{},
 		&ProfitLedger{},
+		&Ticket{},
+		&TicketReply{},
+		&TicketAttachment{},
 	)
 	if err != nil {
 		return err
