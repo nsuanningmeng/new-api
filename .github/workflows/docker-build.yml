@@ -67,6 +67,13 @@ jobs:
           username: ${{ secrets.DOCKERHUB_USERNAME }}
           password: ${{ secrets.DOCKERHUB_TOKEN }}
 
+      - name: Log in to GitHub Container Registry
+        uses: docker/login-action@v3
+        with:
+          registry: ghcr.io
+          username: ${{ github.actor }}
+          password: ${{ secrets.GITHUB_TOKEN }}
+
       - name: Extract metadata (labels)
         id: meta
         uses: docker/metadata-action@v5
@@ -80,9 +87,13 @@ jobs:
           context: .
           platforms: ${{ matrix.platform }}
           push: true
+          # 双 registry：ghcr.io 为主源；docker.io 为备用。
+          # 同一 build 直接 push 到两边，避免 image digest 不一致。
           tags: |
             nsuanningmeng/new-api:${{ env.TAG }}-${{ matrix.arch }}
             nsuanningmeng/new-api:latest-${{ matrix.arch }}
+            ghcr.io/nsuanningmeng/new-api:${{ env.TAG }}-${{ matrix.arch }}
+            ghcr.io/nsuanningmeng/new-api:latest-${{ matrix.arch }}
           labels: ${{ steps.meta.outputs.labels }}
           cache-from: type=gha
           cache-to: type=gha,mode=max
@@ -93,12 +104,15 @@ jobs:
         uses: sigstore/cosign-installer@v3
 
       - name: Sign image with cosign
-        run: cosign sign --yes nsuanningmeng/new-api@${{ steps.build.outputs.digest }}
+        run: |
+          cosign sign --yes nsuanningmeng/new-api@${{ steps.build.outputs.digest }}
+          cosign sign --yes ghcr.io/nsuanningmeng/new-api@${{ steps.build.outputs.digest }}
 
       - name: Image summary
         run: |
           echo "### Docker Image Digest (${{ matrix.arch }})" >> $GITHUB_STEP_SUMMARY
           echo '```' >> $GITHUB_STEP_SUMMARY
+          echo "ghcr.io/nsuanningmeng/new-api:${TAG}-${{ matrix.arch }}" >> $GITHUB_STEP_SUMMARY
           echo "nsuanningmeng/new-api:${TAG}-${{ matrix.arch }}" >> $GITHUB_STEP_SUMMARY
           echo "${{ steps.build.outputs.digest }}" >> $GITHUB_STEP_SUMMARY
           echo '```' >> $GITHUB_STEP_SUMMARY
@@ -119,12 +133,23 @@ jobs:
           username: ${{ secrets.DOCKERHUB_USERNAME }}
           password: ${{ secrets.DOCKERHUB_TOKEN }}
 
+      - name: Log in to GitHub Container Registry
+        uses: docker/login-action@v3
+        with:
+          registry: ghcr.io
+          username: ${{ github.actor }}
+          password: ${{ secrets.GITHUB_TOKEN }}
+
       - name: Create & push manifest (version)
         run: |
           docker buildx imagetools create \
             -t nsuanningmeng/new-api:${TAG} \
             nsuanningmeng/new-api:${TAG}-amd64 \
             nsuanningmeng/new-api:${TAG}-arm64
+          docker buildx imagetools create \
+            -t ghcr.io/nsuanningmeng/new-api:${TAG} \
+            ghcr.io/nsuanningmeng/new-api:${TAG}-amd64 \
+            ghcr.io/nsuanningmeng/new-api:${TAG}-arm64
 
       - name: Create & push manifest (latest)
         run: |
@@ -132,10 +157,19 @@ jobs:
             -t nsuanningmeng/new-api:latest \
             nsuanningmeng/new-api:latest-amd64 \
             nsuanningmeng/new-api:latest-arm64
+          docker buildx imagetools create \
+            -t ghcr.io/nsuanningmeng/new-api:latest \
+            ghcr.io/nsuanningmeng/new-api:latest-amd64 \
+            ghcr.io/nsuanningmeng/new-api:latest-arm64
 
       - name: Manifest summary
         run: |
-          echo "### Multi-arch Manifest" >> $GITHUB_STEP_SUMMARY
+          echo "### Multi-arch Manifests" >> $GITHUB_STEP_SUMMARY
+          echo '#### ghcr.io (primary)' >> $GITHUB_STEP_SUMMARY
+          echo '```' >> $GITHUB_STEP_SUMMARY
+          docker buildx imagetools inspect ghcr.io/nsuanningmeng/new-api:${TAG} >> $GITHUB_STEP_SUMMARY
+          echo '```' >> $GITHUB_STEP_SUMMARY
+          echo '#### docker.io (mirror)' >> $GITHUB_STEP_SUMMARY
           echo '```' >> $GITHUB_STEP_SUMMARY
           docker buildx imagetools inspect nsuanningmeng/new-api:${TAG} >> $GITHUB_STEP_SUMMARY
           echo '```' >> $GITHUB_STEP_SUMMARY
