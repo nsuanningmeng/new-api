@@ -1,6 +1,7 @@
 package controller
 
 import (
+	"errors"
 	"strconv"
 	"strings"
 
@@ -224,13 +225,13 @@ func validatePriceRule(rule *model.PriceRule) error {
 		}
 	case model.PriceRuleOwnerUser:
 	default:
-		return common.NewError("invalid owner_type")
+		return errors.New("invalid owner_type")
 	}
 	if rule.OwnerType != model.PriceRuleOwnerPlatform && rule.OwnerId <= 0 {
-		return common.NewError("owner_id is required")
+		return errors.New("owner_id is required")
 	}
 	if rule.ExpiredAt != 0 && rule.ExpiredAt <= rule.EffectiveAt {
-		return common.NewError("expired_at must be > effective_at")
+		return errors.New("expired_at must be > effective_at")
 	}
 	return service.ValidatePriceMonotonic(&relaycommon.SaaSPriceQuote{
 		PlatformCostQuota:       rule.PlatformCostQuota,
