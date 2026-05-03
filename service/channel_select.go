@@ -2,6 +2,7 @@ package service
 
 import (
 	"errors"
+	"fmt"
 
 	"github.com/QuantumNous/new-api/common"
 	"github.com/QuantumNous/new-api/constant"
@@ -177,7 +178,7 @@ func CacheGetRandomSatisfiedChannel(param *RetryParam) (*model.Channel, string, 
 			channel, err = model.GetRandomSatisfiedChannel(orderedGroup, param.ModelName, priorityRetry)
 			if channel == nil {
 				if err != nil {
-					logger.LogError(param.Ctx, "Error getting channel in ordered group %s: %v", orderedGroup, err)
+					logger.LogError(param.Ctx, fmt.Sprintf("Error getting channel in ordered group %s: %v", orderedGroup, err))
 				}
 				logger.LogDebug(param.Ctx, "No available channel in ordered group %s for model %s at priorityRetry %d, trying next group", orderedGroup, param.ModelName, priorityRetry)
 				common.SetContextKey(param.Ctx, constant.ContextKeyAutoGroupIndex, i+1)
