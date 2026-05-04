@@ -76,11 +76,14 @@ func GetOptions(c *gin.Context) {
 	common.OptionMapRWMutex.Lock()
 	for k, v := range common.OptionMap {
 		value := common.Interface2String(v)
-		isSensitiveKey := strings.HasSuffix(k, "Token") ||
-			strings.HasSuffix(k, "Secret") ||
-			strings.HasSuffix(k, "Key") ||
-			strings.HasSuffix(k, "secret") ||
-			strings.HasSuffix(k, "api_key")
+		// Sensitive-suffix filter: case-insensitive on the lowercased key so
+		// snake_case namespaces (e.g. seo.baidu_push_token, oidc.client_secret)
+		// are caught alongside CamelCase keys (TelegramBotToken, GitHubClientSecret).
+		lk := strings.ToLower(k)
+		isSensitiveKey := strings.HasSuffix(lk, "token") ||
+			strings.HasSuffix(lk, "secret") ||
+			strings.HasSuffix(lk, "key") ||
+			strings.HasSuffix(lk, "api_key")
 		if isSensitiveKey && !isVisiblePublicKeyOption(k) {
 			continue
 		}
