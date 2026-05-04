@@ -547,11 +547,21 @@ func CompleteSubscriptionOrder(tradeNo string, providerPayload string, expectedP
 		if err != nil {
 			return err
 		}
-		if err := upsertSubscriptionTopUpTx(tx, &order); err != nil {
+		// Resolve the effective payment method before deriving TopUp so the bill row
+		// records the real callback method (e.g. Epay returns the actual channel).
+		effectivePaymentMethod := order.PaymentMethod
+		if actualPaymentMethod != "" {
+			effectivePaymentMethod = actualPaymentMethod
+		}
+		// Use a single timestamp for both order completion and the derived TopUp's
+		// create_time/complete_time, so the bill row falls inside the 30-day query
+		// window regardless of how long the order sat in pending state.
+		completionTime := common.GetTimestamp()
+		if err := upsertSubscriptionTopUpTx(tx, &order, completionTime, effectivePaymentMethod); err != nil {
 			return err
 		}
 		order.Status = common.TopUpStatusSuccess
-		order.CompleteTime = common.GetTimestamp()
+		order.CompleteTime = completionTime
 		if providerPayload != "" {
 			order.ProviderPayload = providerPayload
 		}
@@ -564,7 +574,7 @@ func CompleteSubscriptionOrder(tradeNo string, providerPayload string, expectedP
 		logUserId = order.UserId
 		logPlanTitle = plan.Title
 		logMoney = order.Money
-		logPaymentMethod = order.PaymentMethod
+		logPaymentMethod = effectivePaymentMethod
 		return nil
 	})
 	if err != nil {
@@ -575,45 +585,104 @@ func CompleteSubscriptionOrder(tradeNo string, providerPayload string, expectedP
 	}
 	if logUserId > 0 {
 		msg := fmt.Sprintf("订阅购买成功，套餐: %s，支付金额: %.2f，支付方式: %s", logPlanTitle, logMoney, logPaymentMethod)
-		RecordLog(logUserId, LogTypeTopup, msg)
+		// RecordTopupLog persists Other.admin_info (server_ip / payment_method / version);
+		// otherwise the frontend treats type==1 logs lacking admin_info as "legacy version".
+		// callerIp is unknown inside webhook context, so we pass "".
+		RecordTopupLog(logUserId, msg, "", logPaymentMethod, logPaymentMethod)
 	}
 	return nil
 }
 
-func upsertSubscriptionTopUpTx(tx *gorm.DB, order *SubscriptionOrder) error {
+// upsertSubscriptionTopUpTx writes the bill row derived from a completed subscription order.
+// completionTime is reused for create_time/complete_time so the row stays within the billing
+// query window. effectivePaymentMethod reflects the callback's real method, not the original
+// pre-checkout selection. payment_provider / tenant_id / reseller_id are populated so multi-
+// tenant scoped views can include the row.
+func upsertSubscriptionTopUpTx(tx *gorm.DB, order *SubscriptionOrder, completionTime int64, effectivePaymentMethod string) error {
 	if tx == nil || order == nil {
 		return errors.New("invalid subscription order")
 	}
-	now := common.GetTimestamp()
+	if completionTime <= 0 {
+		completionTime = common.GetTimestamp()
+	}
+	if effectivePaymentMethod == "" {
+		effectivePaymentMethod = order.PaymentMethod
+	}
 	var topup TopUp
 	if err := tx.Where("trade_no = ?", order.TradeNo).First(&topup).Error; err != nil {
 		if errors.Is(err, gorm.ErrRecordNotFound) {
+			tenantId, resellerId, scopeErr := getUserScopeForTopUpTx(tx, order.UserId)
+			if scopeErr != nil {
+				return scopeErr
+			}
 			topup = TopUp{
-				UserId:        order.UserId,
-				Amount:        0,
-				Money:         order.Money,
-				TradeNo:       order.TradeNo,
-				PaymentMethod: order.PaymentMethod,
-				CreateTime:    order.CreateTime,
-				CompleteTime:  now,
-				Status:        common.TopUpStatusSuccess,
+				UserId:          order.UserId,
+				TenantId:        tenantId,
+				ResellerId:      resellerId,
+				Amount:          0,
+				Money:           order.Money,
+				TradeNo:         order.TradeNo,
+				PaymentMethod:   effectivePaymentMethod,
+				PaymentProvider: order.PaymentProvider,
+				CreateTime:      completionTime,
+				CompleteTime:    completionTime,
+				Status:          common.TopUpStatusSuccess,
 			}
 			return tx.Create(&topup).Error
 		}
 		return err
 	}
-	topup.Money = order.Money
-	if topup.PaymentMethod == "" {
-		topup.PaymentMethod = order.PaymentMethod
-	} else if topup.PaymentMethod != order.PaymentMethod {
+	// Cross-trade pollution guard: existing TopUp must belong to the same user
+	// and not have been written via a different payment provider.
+	if topup.UserId != order.UserId {
 		return ErrPaymentMethodMismatch
 	}
-	if topup.CreateTime == 0 {
-		topup.CreateTime = order.CreateTime
+	if topup.PaymentProvider != "" && order.PaymentProvider != "" &&
+		topup.PaymentProvider != order.PaymentProvider {
+		return ErrPaymentMethodMismatch
 	}
-	topup.CompleteTime = now
+	topup.Money = order.Money
+	if topup.PaymentMethod == "" {
+		topup.PaymentMethod = effectivePaymentMethod
+	} else if effectivePaymentMethod != "" && topup.PaymentMethod != effectivePaymentMethod {
+		return ErrPaymentMethodMismatch
+	}
+	// Backfill missing scope fields without overwriting existing data.
+	if topup.PaymentProvider == "" && order.PaymentProvider != "" {
+		topup.PaymentProvider = order.PaymentProvider
+	}
+	if topup.TenantId == 0 || topup.ResellerId == 0 {
+		tenantId, resellerId, scopeErr := getUserScopeForTopUpTx(tx, order.UserId)
+		if scopeErr != nil {
+			return scopeErr
+		}
+		if topup.TenantId == 0 {
+			topup.TenantId = tenantId
+		}
+		if topup.ResellerId == 0 {
+			topup.ResellerId = resellerId
+		}
+	}
+	if topup.CreateTime == 0 {
+		topup.CreateTime = completionTime
+	}
+	topup.CompleteTime = completionTime
 	topup.Status = common.TopUpStatusSuccess
 	return tx.Save(&topup).Error
+}
+
+func getUserScopeForTopUpTx(tx *gorm.DB, userId int) (int, int, error) {
+	if tx == nil || userId <= 0 {
+		return 0, 0, nil
+	}
+	var u User
+	if err := tx.Select("tenant_id", "reseller_id").Where("id = ?", userId).First(&u).Error; err != nil {
+		if errors.Is(err, gorm.ErrRecordNotFound) {
+			return 0, 0, nil
+		}
+		return 0, 0, err
+	}
+	return u.TenantId, u.ResellerId, nil
 }
 
 func ExpireSubscriptionOrder(tradeNo string, expectedPaymentProvider string) error {

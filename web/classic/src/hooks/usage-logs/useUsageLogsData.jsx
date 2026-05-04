@@ -681,16 +681,24 @@ export const useLogsData = () => {
             });
           }
         } else {
-          expandDataLocal.push({
-            key: t('审计信息'),
-            value: (
-              <span style={{ color: 'var(--semi-color-warning)' }}>
-                {t(
-                  '该记录由旧版本实例写入，缺少审计信息，建议将实例升级至最新版本以便记录服务器IP、回调IP、支付方式与系统版本等审计字段。',
-                )}
-              </span>
-            ),
-          });
+          // Historical subscription completion logs were written via RecordLog and lack
+          // admin_info by design — surfacing the "legacy version" warning for them is misleading.
+          // Detect them via the localized content prefix used in CompleteSubscriptionOrder.
+          const isLegacySubscriptionLog =
+            typeof logs[i].content === 'string' &&
+            logs[i].content.startsWith('订阅购买成功');
+          if (!isLegacySubscriptionLog) {
+            expandDataLocal.push({
+              key: t('审计信息'),
+              value: (
+                <span style={{ color: 'var(--semi-color-warning)' }}>
+                  {t(
+                    '该记录由旧版本实例写入，缺少审计信息，建议将实例升级至最新版本以便记录服务器IP、回调IP、支付方式与系统版本等审计字段。',
+                  )}
+                </span>
+              ),
+            });
+          }
         }
       }
       if (isAdminUser && logs[i].type === 3 && other?.admin_info) {
