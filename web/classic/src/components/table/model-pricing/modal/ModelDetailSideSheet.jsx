@@ -17,11 +17,12 @@ along with this program. If not, see <https://www.gnu.org/licenses/>.
 For commercial licensing, please contact support@quantumnous.com
 */
 
-import React from 'react';
+import React, { useEffect, useState } from 'react';
 import { SideSheet, Typography, Button, Divider } from '@douyinfe/semi-ui';
 import { IconClose } from '@douyinfe/semi-icons';
 
 import { useIsMobile } from '../../../../hooks/common/useIsMobile';
+import { useModelAvailability } from '../../../../hooks/model-pricing/useModelAvailability';
 import ModelHeader from './components/ModelHeader';
 import ModelBasicInfo from './components/ModelBasicInfo';
 import ModelEndpoints from './components/ModelEndpoints';
@@ -47,6 +48,30 @@ const ModelDetailSideSheet = ({
   t,
 }) => {
   const isMobile = useIsMobile();
+  const { getModelGroupsData, thresholds } = useModelAvailability({ enabled: visible });
+  const [groupAvailability, setGroupAvailability] = useState({});
+
+  useEffect(() => {
+    if (!visible || !modelData?.model_name) {
+      setGroupAvailability({});
+      return;
+    }
+    let cancelled = false;
+    getModelGroupsData(modelData.model_name).then((result) => {
+      if (cancelled) return;
+      const map = {};
+      (result?.items || []).forEach((g) => {
+        map[g.group] = {
+          availability: g.availability,
+          status: g.status,
+        };
+      });
+      setGroupAvailability(map);
+    });
+    return () => {
+      cancelled = true;
+    };
+  }, [visible, modelData?.model_name, getModelGroupsData]);
 
   return (
     <SideSheet
@@ -119,6 +144,8 @@ const ModelDetailSideSheet = ({
                 usableGroup={usableGroup}
                 autoGroups={autoGroups}
                 t={t}
+                groupAvailability={groupAvailability}
+                thresholds={thresholds}
               />
             </div>
             <Divider margin={16} />

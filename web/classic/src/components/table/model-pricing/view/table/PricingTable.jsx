@@ -24,6 +24,7 @@ import {
   IllustrationNoResultDark,
 } from '@douyinfe/semi-illustrations';
 import { getPricingTableColumns } from './PricingTableColumns';
+import { useModelAvailability } from '../../../../../hooks/model-pricing/useModelAvailability';
 
 const PricingTable = ({
   filteredModels,
@@ -46,6 +47,8 @@ const PricingTable = ({
   openModelDetail,
   t,
 }) => {
+  const { overview: availabilityMap, thresholds } = useModelAvailability();
+
   const columns = useMemo(() => {
     return getPricingTableColumns({
       t,
@@ -59,6 +62,8 @@ const PricingTable = ({
       tokenUnit,
       displayPrice,
       showRatio,
+      availabilityMap,
+      thresholds,
     });
   }, [
     t,
@@ -72,6 +77,8 @@ const PricingTable = ({
     tokenUnit,
     displayPrice,
     showRatio,
+    availabilityMap,
+    thresholds,
   ]);
 
   // 更新列定义中的 searchValue
