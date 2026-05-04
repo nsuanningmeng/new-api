@@ -22,7 +22,7 @@ import { Avatar, Typography, Table, Tag } from '@douyinfe/semi-ui';
 import { IconCoinMoneyStroked } from '@douyinfe/semi-icons';
 import { calculateModelPrice, getModelPriceItems } from '../../../../../helpers';
 import {
-  getAvailabilityColor,
+  getAvailabilityCssColor,
   formatAvailability,
 } from '../../../../../helpers/availability';
 
@@ -104,10 +104,10 @@ const ModelPricingTable = ({
               </Tag>
               {pct !== undefined && pct !== null && (
                 <Text
-                  type='tertiary'
                   size='small'
+                  aria-label={`${text} ${formatAvailability(pct)}`}
                   style={{
-                    color: `var(--semi-color-${getAvailabilityColor(pct, thresholds)})`,
+                    color: `var(--semi-color-${getAvailabilityCssColor(pct, thresholds)})`,
                     marginTop: '2px',
                     paddingLeft: '4px',
                   }}

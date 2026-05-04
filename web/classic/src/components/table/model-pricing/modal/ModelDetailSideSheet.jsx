@@ -48,7 +48,10 @@ const ModelDetailSideSheet = ({
   t,
 }) => {
   const isMobile = useIsMobile();
-  const { getModelGroupsData, thresholds } = useModelAvailability({ enabled: visible });
+  const { getModelGroupsData, thresholds } = useModelAvailability({
+    enabled: visible,
+    fetchOverview: false,
+  });
   const [groupAvailability, setGroupAvailability] = useState({});
 
   useEffect(() => {

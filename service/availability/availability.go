@@ -2,6 +2,7 @@ package availability
 
 import (
 	"context"
+	"errors"
 	"math"
 	"sort"
 	"strconv"
@@ -15,6 +16,7 @@ import (
 	relaycommon "github.com/QuantumNous/new-api/relay/common"
 	"github.com/QuantumNous/new-api/setting/operation_setting"
 	"github.com/gin-gonic/gin"
+	"golang.org/x/sync/singleflight"
 )
 
 const (
@@ -23,6 +25,7 @@ const (
 	defaultWindow   = 3600
 	cacheTTL        = 5 * time.Second
 	cacheMaxEntries = 1024
+	maxNameLen      = 191
 )
 
 type counterKey struct {
@@ -50,8 +53,8 @@ type GroupItem struct {
 	Group               string   `json:"group"`
 	Availability        *float64 `json:"availability"`
 	Status              string   `json:"status"`
-	SuccessCount        int64    `json:"success_count"`
-	TotalCount          int64    `json:"total_count"`
+	SuccessCount        int64    `json:"-"`
+	TotalCount          int64    `json:"-"`
 	ExcludedFromOverall bool     `json:"excluded_from_overall"`
 }
 
@@ -59,8 +62,8 @@ type ModelItem struct {
 	Model        string   `json:"model"`
 	Availability *float64 `json:"availability"`
 	Status       string   `json:"status"`
-	SuccessCount int64    `json:"success_count"`
-	TotalCount   int64    `json:"total_count"`
+	SuccessCount int64    `json:"-"`
+	TotalCount   int64    `json:"-"`
 }
 
 type OverviewResult struct {
@@ -92,6 +95,10 @@ var (
 
 	cacheMu sync.Mutex
 	cache   = make(map[string]cacheEntry)
+
+	queryGroup             singleflight.Group
+	countStatusRawCache    atomic.Value
+	countStatusRangesCache atomic.Value
 )
 
 func init() {
@@ -114,7 +121,7 @@ func RecordFinal(c *gin.Context, info *relaycommon.RelayInfo) {
 	if groupName == "" {
 		groupName = strings.TrimSpace(info.TokenGroup)
 	}
-	if modelName == "" || groupName == "" {
+	if modelName == "" || groupName == "" || len(modelName) > maxNameLen || len(groupName) > maxNameLen {
 		return
 	}
 
@@ -193,6 +200,25 @@ func GetOverview() (*OverviewResult, error) {
 		}
 	}
 
+	value, err, _ := queryGroup.Do(cacheKey, func() (any, error) {
+		if cached, ok := getCache(cacheKey); ok {
+			if result, ok := cached.(*OverviewResult); ok {
+				return result, nil
+			}
+		}
+		return loadOverview(window, th, excludeRaw, cacheKey)
+	})
+	if err != nil {
+		return nil, err
+	}
+	result, ok := value.(*OverviewResult)
+	if !ok {
+		return nil, errors.New("invalid availability overview cache value")
+	}
+	return result, nil
+}
+
+func loadOverview(window int, th thresholds, excludeRaw string, cacheKey string) (*OverviewResult, error) {
 	rows, err := model.QueryAvailabilityRows(context.Background(), cutoffBucket(window), "")
 	if err != nil {
 		return nil, err
@@ -235,6 +261,12 @@ func GetOverview() (*OverviewResult, error) {
 
 func GetGroups(modelName string) (*GroupsResult, error) {
 	modelName = strings.TrimSpace(modelName)
+	if modelName == "" {
+		return nil, errors.New("model parameter required")
+	}
+	if len(modelName) > maxNameLen {
+		return nil, errors.New("model parameter too long")
+	}
 	th := getThresholds()
 	window := getWindowSeconds()
 	excludeRaw := getOption("availability.exclude_keywords", "")
@@ -245,6 +277,25 @@ func GetGroups(modelName string) (*GroupsResult, error) {
 		}
 	}
 
+	value, err, _ := queryGroup.Do(cacheKey, func() (any, error) {
+		if cached, ok := getCache(cacheKey); ok {
+			if result, ok := cached.(*GroupsResult); ok {
+				return result, nil
+			}
+		}
+		return loadGroups(modelName, window, th, excludeRaw, cacheKey)
+	})
+	if err != nil {
+		return nil, err
+	}
+	result, ok := value.(*GroupsResult)
+	if !ok {
+		return nil, errors.New("invalid availability groups cache value")
+	}
+	return result, nil
+}
+
+func loadGroups(modelName string, window int, th thresholds, excludeRaw string, cacheKey string) (*GroupsResult, error) {
 	rows, err := model.QueryAvailabilityRows(context.Background(), cutoffBucket(window), modelName)
 	if err != nil {
 		return nil, err
@@ -393,10 +444,23 @@ func fnv32Byte(value byte, hash uint32) uint32 {
 }
 
 func countStatusCode(code int) bool {
-	ranges, err := operation_setting.ParseHTTPStatusCodeRanges(getOption("availability.count_status", "500-599,429"))
+	raw := getOption("availability.count_status", "500-599,429")
+	if cachedRaw, ok := countStatusRawCache.Load().(string); ok && cachedRaw == raw {
+		if ranges, ok := countStatusRangesCache.Load().([]operation_setting.StatusCodeRange); ok {
+			return matchesStatusCodeRanges(ranges, code)
+		}
+	}
+
+	ranges, err := operation_setting.ParseHTTPStatusCodeRanges(raw)
 	if err != nil {
 		ranges, _ = operation_setting.ParseHTTPStatusCodeRanges("500-599,429")
 	}
+	countStatusRawCache.Store(raw)
+	countStatusRangesCache.Store(ranges)
+	return matchesStatusCodeRanges(ranges, code)
+}
+
+func matchesStatusCodeRanges(ranges []operation_setting.StatusCodeRange, code int) bool {
 	for _, r := range ranges {
 		if code >= r.Start && code <= r.End {
 			return true

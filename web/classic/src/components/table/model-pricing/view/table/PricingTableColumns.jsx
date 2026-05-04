@@ -119,6 +119,7 @@ export const getPricingTableColumns = ({
   showRatio,
   availabilityMap,
   thresholds,
+  compactMode = false,
 }) => {
   const isMobile = useIsMobile();
   const priceDataCache = new WeakMap();
@@ -274,7 +275,12 @@ export const getPricingTableColumns = ({
 
   const columns = [...baseColumns];
   columns.push(endpointColumn);
-  columns.push(availabilityColumn);
+  // Skip availability column in compact (mobile) mode to avoid horizontal
+  // overflow on narrow screens since the table disables horizontal scroll
+  // when compactMode is on.
+  if (!compactMode) {
+    columns.push(availabilityColumn);
+  }
   if (showRatio) {
     columns.push(ratioColumn);
   }

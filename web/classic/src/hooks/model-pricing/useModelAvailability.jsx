@@ -17,17 +17,25 @@ along with this program. If not, see <https://www.gnu.org/licenses/>.
 For commercial licensing, please contact support@quantumnous.com
 */
 
-import { useState, useEffect, useRef, useCallback } from 'react';
+import { useState, useEffect, useCallback } from 'react';
 import { API, showError } from '../../helpers';
 
-export const useModelAvailability = ({ enabled = true, refreshIntervalMs = 60000 } = {}) => {
+// Module-level shared cache for per-model groups data; survives across hook
+// instances so PricingTable + ModelDetailSideSheet share TTL benefits.
+const groupsCache = new Map();
+const GROUPS_CACHE_TTL_MS = 30000;
+const GROUPS_CACHE_MAX_ENTRIES = 256;
+
+export const useModelAvailability = ({
+  enabled = true,
+  refreshIntervalMs = 60000,
+  fetchOverview = true,
+} = {}) => {
   const [overview, setOverview] = useState({});
   const [thresholds, setThresholds] = useState({ green: 99, red: 95 });
   const [windowSeconds, setWindowSeconds] = useState(3600);
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState(null);
-  
-  const cacheRef = useRef(new Map());
 
   const loadOverview = useCallback(async (isAutoRefresh = false) => {
     if (!isAutoRefresh) setLoading(true);
@@ -62,10 +70,13 @@ export const useModelAvailability = ({ enabled = true, refreshIntervalMs = 60000
   }, []);
 
   const getModelGroupsData = useCallback(async (modelName) => {
+    if (!modelName || typeof modelName !== 'string') {
+      return { items: [], thresholds };
+    }
     const now = Date.now();
-    const cached = cacheRef.current.get(modelName);
-    
-    if (cached && (now - cached.timestamp < 30000)) {
+    const cached = groupsCache.get(modelName);
+
+    if (cached && now - cached.timestamp < GROUPS_CACHE_TTL_MS) {
       return cached.data;
     }
 
@@ -75,12 +86,12 @@ export const useModelAvailability = ({ enabled = true, refreshIntervalMs = 60000
       if (success && data) {
         const result = {
           items: data.items || [],
-          thresholds: data.thresholds || thresholds
+          thresholds: data.thresholds || thresholds,
         };
-        cacheRef.current.set(modelName, {
-          timestamp: now,
-          data: result
-        });
+        if (groupsCache.size >= GROUPS_CACHE_MAX_ENTRIES) {
+          groupsCache.clear();
+        }
+        groupsCache.set(modelName, { timestamp: now, data: result });
         return result;
       } else if (message) {
         showError(message);
@@ -94,13 +105,13 @@ export const useModelAvailability = ({ enabled = true, refreshIntervalMs = 60000
   const refresh = useCallback(() => loadOverview(false), [loadOverview]);
 
   useEffect(() => {
-    if (!enabled) return;
+    if (!enabled || !fetchOverview) return;
 
     loadOverview();
     const timer = setInterval(() => loadOverview(true), refreshIntervalMs);
-    
+
     return () => clearInterval(timer);
-  }, [enabled, refreshIntervalMs, loadOverview]);
+  }, [enabled, fetchOverview, refreshIntervalMs, loadOverview]);
 
   return {
     overview,

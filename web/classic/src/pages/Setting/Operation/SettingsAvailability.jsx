@@ -49,18 +49,26 @@ export default function SettingsAvailability(props) {
   }
 
   function onSubmit() {
-    // Validation
+    // Coerce undefined/null/NaN to safe defaults so we never POST "undefined"
+    // or NaN-bearing JSON to the server.
+    const greenNum = Number(inputs['availability.thresholds.green']);
+    const redNum = Number(inputs['availability.thresholds.red']);
+    const flushNum = Number(inputs['availability.flush_seconds']);
+    const windowNum = Number(inputs['availability.window_seconds']);
+
     if (
-      inputs['availability.thresholds.red'] < 0 ||
-      inputs['availability.thresholds.red'] > inputs['availability.thresholds.green'] ||
-      inputs['availability.thresholds.green'] > 100
+      !Number.isFinite(greenNum) ||
+      !Number.isFinite(redNum) ||
+      redNum < 0 ||
+      redNum > greenNum ||
+      greenNum > 100
     ) {
       return showError(t('阈值无效：0 ≤ 红色 ≤ 绿色 ≤ 100'));
     }
-    if (inputs['availability.flush_seconds'] < 5 || inputs['availability.flush_seconds'] > 3600) {
+    if (!Number.isFinite(flushNum) || flushNum < 5 || flushNum > 3600) {
       return showError(t('刷新间隔必须在 5 到 3600 秒之间'));
     }
-    if (inputs['availability.window_seconds'] < 60 || inputs['availability.window_seconds'] > 2592000) {
+    if (!Number.isFinite(windowNum) || windowNum < 60 || windowNum > 2592000) {
       return showError(t('统计窗口必须在 60 到 2592000 秒之间'));
     }
 
@@ -75,17 +83,27 @@ export default function SettingsAvailability(props) {
     const requestQueue = [];
 
     if (hasThresholdUpdate) {
-      const thresholds = JSON.stringify({
-        green: Number(inputs['availability.thresholds.green']),
-        red: Number(inputs['availability.thresholds.red']),
-      });
-      requestQueue.push(API.put('/api/option/', { key: 'availability.thresholds', value: thresholds }));
+      const thresholdsJson = JSON.stringify({ green: greenNum, red: redNum });
+      requestQueue.push(API.put('/api/option/', { key: 'availability.thresholds', value: thresholdsJson }));
     }
 
+    const numericKeys = {
+      'availability.flush_seconds': flushNum,
+      'availability.window_seconds': windowNum,
+    };
+
     updateArray.forEach((item) => {
-      if (!['availability.thresholds.green', 'availability.thresholds.red'].includes(item.key)) {
-        requestQueue.push(API.put('/api/option/', { key: item.key, value: String(inputs[item.key]) }));
+      if (['availability.thresholds.green', 'availability.thresholds.red'].includes(item.key)) {
+        return;
       }
+      let value;
+      if (item.key in numericKeys) {
+        value = String(numericKeys[item.key]);
+      } else {
+        // string options (count_status, exclude_keywords) — coerce nullish to ''
+        value = inputs[item.key] == null ? '' : String(inputs[item.key]);
+      }
+      requestQueue.push(API.put('/api/option/', { key: item.key, value }));
     });
 
     setLoading(true);
@@ -180,7 +198,7 @@ export default function SettingsAvailability(props) {
                 <Form.Input
                   field={'availability.exclude_keywords'}
                   label={t('排除分组关键词（逗号分隔，支持中文）')}
-                  placeholder={t('排除分组关键词（逗号分隔，支持中文）')}
+                  placeholder={'test, 测试, internal'}
                   onChange={handleFieldChange('availability.exclude_keywords')}
                 />
               </Col>

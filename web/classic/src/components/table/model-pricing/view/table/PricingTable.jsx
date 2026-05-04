@@ -64,6 +64,7 @@ const PricingTable = ({
       showRatio,
       availabilityMap,
       thresholds,
+      compactMode,
     });
   }, [
     t,
@@ -79,6 +80,7 @@ const PricingTable = ({
     showRatio,
     availabilityMap,
     thresholds,
+    compactMode,
   ]);
 
   // 更新列定义中的 searchValue

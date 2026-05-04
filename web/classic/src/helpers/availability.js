@@ -18,16 +18,33 @@ For commercial licensing, please contact support@quantumnous.com
 */
 
 /**
- * Get color based on availability percentage and thresholds
+ * Get Semi UI Tag color name based on availability percentage and thresholds.
+ * Used for <Tag color={...}> consumption.
  * @param {number|null} pct - Availability percentage (0-100)
  * @param {Object} thresholds - { green, red }
- * @returns {string} Semi UI color token
+ * @returns {string} Semi UI Tag color: 'green' | 'yellow' | 'red' | 'grey'
  */
 export const getAvailabilityColor = (pct, thresholds = { green: 99, red: 95 }) => {
   if (pct === null || pct === undefined) return 'grey';
   if (pct >= thresholds.green) return 'green';
   if (pct >= thresholds.red) return 'yellow';
   return 'red';
+};
+
+/**
+ * Get the matching Semi UI semantic CSS variable suffix.
+ * Returns one of 'success' / 'warning' / 'danger' / 'tertiary'
+ * which are valid for `var(--semi-color-${suffix})` interpolation,
+ * unlike the Tag color names which do not map to CSS vars.
+ * @param {number|null} pct - Availability percentage (0-100)
+ * @param {Object} thresholds - { green, red }
+ * @returns {string} CSS variable suffix
+ */
+export const getAvailabilityCssColor = (pct, thresholds = { green: 99, red: 95 }) => {
+  if (pct === null || pct === undefined) return 'tertiary';
+  if (pct >= thresholds.green) return 'success';
+  if (pct >= thresholds.red) return 'warning';
+  return 'danger';
 };
 
 /**
