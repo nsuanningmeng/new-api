@@ -21,6 +21,10 @@ import React from 'react';
 import { Avatar, Typography, Table, Tag } from '@douyinfe/semi-ui';
 import { IconCoinMoneyStroked } from '@douyinfe/semi-icons';
 import { calculateModelPrice, getModelPriceItems } from '../../../../../helpers';
+import {
+  getAvailabilityColor,
+  formatAvailability,
+} from '../../../../../helpers/availability';
 
 const { Text } = Typography;
 
@@ -35,6 +39,8 @@ const ModelPricingTable = ({
   usableGroup,
   autoGroups = [],
   t,
+  groupAvailability,
+  thresholds,
 }) => {
   const modelEnableGroups = Array.isArray(modelData?.enable_groups)
     ? modelData.enable_groups
@@ -87,12 +93,31 @@ const ModelPricingTable = ({
       {
         title: t('分组'),
         dataIndex: 'group',
-        render: (text) => (
-          <Tag color='white' size='small' shape='circle'>
-            {text}
-            {t('分组')}
-          </Tag>
-        ),
+        render: (text) => {
+          const availabilityData = groupAvailability?.[text];
+          const pct = availabilityData?.availability;
+          return (
+            <div className='flex flex-col'>
+              <Tag color='white' size='small' shape='circle' className='w-fit'>
+                {text}
+                {t('分组')}
+              </Tag>
+              {pct !== undefined && pct !== null && (
+                <Text
+                  type='tertiary'
+                  size='small'
+                  style={{
+                    color: `var(--semi-color-${getAvailabilityColor(pct, thresholds)})`,
+                    marginTop: '2px',
+                    paddingLeft: '4px',
+                  }}
+                >
+                  {formatAvailability(pct)}
+                </Text>
+              )}
+            </div>
+          );
+        },
       },
     ];
 

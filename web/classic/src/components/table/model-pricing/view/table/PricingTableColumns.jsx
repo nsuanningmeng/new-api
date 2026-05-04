@@ -28,6 +28,10 @@ import {
   getLobeHubIcon,
 } from '../../../../../helpers';
 import {
+  getAvailabilityColor,
+  formatAvailability,
+} from '../../../../../helpers/availability';
+import {
   renderLimitedItems,
   renderDescription,
 } from '../../../../common/ui/RenderUtils';
@@ -113,6 +117,8 @@ export const getPricingTableColumns = ({
   tokenUnit,
   displayPrice,
   showRatio,
+  availabilityMap,
+  thresholds,
 }) => {
   const isMobile = useIsMobile();
   const priceDataCache = new WeakMap();
@@ -139,6 +145,23 @@ export const getPricingTableColumns = ({
     dataIndex: 'supported_endpoint_types',
     render: (text, record, index) => {
       return renderSupportedEndpoints(text);
+    },
+  };
+
+  const availabilityColumn = {
+    title: t('可用性'),
+    dataIndex: 'availability',
+    width: 100,
+    align: 'center',
+    render: (_, record) => {
+      const data = availabilityMap?.[record.model_name];
+      const pct = data?.availability;
+      const color = getAvailabilityColor(pct, thresholds);
+      return (
+        <Tag color={color} shape='circle'>
+          {formatAvailability(pct)}
+        </Tag>
+      );
     },
   };
 
@@ -251,6 +274,7 @@ export const getPricingTableColumns = ({
 
   const columns = [...baseColumns];
   columns.push(endpointColumn);
+  columns.push(availabilityColumn);
   if (showRatio) {
     columns.push(ratioColumn);
   }
