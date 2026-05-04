@@ -57,7 +57,7 @@ func SetApiRouter(router *gin.Engine) {
 		apiRouter.POST("/verify", middleware.UserAuth(), middleware.CriticalRateLimit(), controller.UniversalVerify)
 
 		availabilityRoute := apiRouter.Group("/availability")
-		availabilityRoute.Use(middleware.UserAuth())
+		availabilityRoute.Use(middleware.UserAuth(), middleware.AvailabilityRateLimit())
 		{
 			availabilityRoute.GET("/models", controller.GetAvailabilityModels)
 			availabilityRoute.GET("/groups", controller.GetAvailabilityModelGroups)

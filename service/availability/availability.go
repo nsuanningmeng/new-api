@@ -21,10 +21,10 @@ import (
 
 const (
 	shardCount      = 32
-	defaultFlushSec = 30
+	defaultFlushSec = 60
 	defaultWindow   = 3600
-	cacheTTL        = 5 * time.Second
-	cacheMaxEntries = 1024
+	cacheTTL        = 60 * time.Second
+	cacheMaxEntries = 512
 	maxNameLen      = 191
 )
 
@@ -369,6 +369,15 @@ func flush() {
 	if len(rows) == 0 {
 		return
 	}
+	sort.Slice(rows, func(i, j int) bool {
+		if rows[i].BucketStart != rows[j].BucketStart {
+			return rows[i].BucketStart < rows[j].BucketStart
+		}
+		if rows[i].ModelName != rows[j].ModelName {
+			return rows[i].ModelName < rows[j].ModelName
+		}
+		return rows[i].GroupName < rows[j].GroupName
+	})
 	if err := model.UpsertAvailabilityBuckets(rows); err != nil {
 		common.SysError("failed to flush availability buckets: " + err.Error())
 		mergeRows(rows)
@@ -482,7 +491,7 @@ func getThresholds() thresholds {
 }
 
 func getFlushSeconds() int {
-	return clampIntOption("availability.flush_seconds", defaultFlushSec, 5, 3600)
+	return clampIntOption("availability.flush_seconds", defaultFlushSec, 60, 3600)
 }
 
 func getWindowSeconds() int {
@@ -585,7 +594,10 @@ func setCache(key string, value any) {
 			}
 		}
 		if len(cache) >= cacheMaxEntries {
-			clear(cache)
+			for cacheKey := range cache {
+				delete(cache, cacheKey)
+				break
+			}
 		}
 	}
 	cache[key] = cacheEntry{

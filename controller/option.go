@@ -333,7 +333,7 @@ func UpdateOption(c *gin.Context) {
 			return
 		}
 	case "availability.flush_seconds":
-		err = validateAvailabilityIntOption(option.Value.(string), 5, 3600)
+		err = validateAvailabilityIntOption(option.Value.(string), 60, 3600)
 		if err != nil {
 			c.JSON(http.StatusOK, gin.H{
 				"success": false,

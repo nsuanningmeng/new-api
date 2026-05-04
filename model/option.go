@@ -179,7 +179,7 @@ func InitOptionMap() {
 	common.OptionMap["availability.thresholds"] = `{"green":99,"red":95}`
 	common.OptionMap["availability.count_status"] = "500-599,429"
 	common.OptionMap["availability.exclude_keywords"] = ""
-	common.OptionMap["availability.flush_seconds"] = "30"
+	common.OptionMap["availability.flush_seconds"] = "60"
 	common.OptionMap["availability.window_seconds"] = "3600"
 	common.OptionMap["ExposeRatioEnabled"] = strconv.FormatBool(ratio_setting.IsExposeRatioEnabled())
 

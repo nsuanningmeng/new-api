@@ -12,12 +12,18 @@ import (
 
 const maxAvailabilityModelNameLen = 191
 
+func setAvailabilityCacheHeaders(c *gin.Context) {
+	c.Header("Cache-Control", "private, max-age=60, stale-while-revalidate=30")
+	c.Header("Vary", "Authorization, Cookie, New-Api-User")
+}
+
 func GetAvailabilityModels(c *gin.Context) {
 	result, err := availability.GetOverview()
 	if err != nil {
 		common.ApiError(c, err)
 		return
 	}
+	setAvailabilityCacheHeaders(c)
 	c.JSON(http.StatusOK, gin.H{
 		"success": true,
 		"message": "",
@@ -40,6 +46,7 @@ func GetAvailabilityModelGroups(c *gin.Context) {
 		common.ApiError(c, err)
 		return
 	}
+	setAvailabilityCacheHeaders(c)
 	c.JSON(http.StatusOK, gin.H{
 		"success": true,
 		"message": "",
