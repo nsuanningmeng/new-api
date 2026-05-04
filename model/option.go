@@ -176,6 +176,11 @@ func InitOptionMap() {
 	common.OptionMap["AutomaticDisableKeywords"] = operation_setting.AutomaticDisableKeywordsToString()
 	common.OptionMap["AutomaticDisableStatusCodes"] = operation_setting.AutomaticDisableStatusCodesToString()
 	common.OptionMap["AutomaticRetryStatusCodes"] = operation_setting.AutomaticRetryStatusCodesToString()
+	common.OptionMap["availability.thresholds"] = `{"green":99,"red":95}`
+	common.OptionMap["availability.count_status"] = "500-599,429"
+	common.OptionMap["availability.exclude_keywords"] = ""
+	common.OptionMap["availability.flush_seconds"] = "30"
+	common.OptionMap["availability.window_seconds"] = "3600"
 	common.OptionMap["ExposeRatioEnabled"] = strconv.FormatBool(ratio_setting.IsExposeRatioEnabled())
 
 	// 自动添加所有注册的模型配置

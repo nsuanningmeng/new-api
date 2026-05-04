@@ -3,6 +3,7 @@ package controller
 import (
 	"fmt"
 	"net/http"
+	"strconv"
 	"strings"
 
 	"github.com/QuantumNous/new-api/common"
@@ -110,6 +111,33 @@ func GetOptions(c *gin.Context) {
 type OptionUpdateRequest struct {
 	Key   string `json:"key"`
 	Value any    `json:"value"`
+}
+
+type availabilityThresholdsOption struct {
+	Green float64 `json:"green"`
+	Red   float64 `json:"red"`
+}
+
+func validateAvailabilityThresholds(raw string) error {
+	var thresholds availabilityThresholdsOption
+	if err := common.UnmarshalJsonStr(raw, &thresholds); err != nil {
+		return err
+	}
+	if thresholds.Red < 0 || thresholds.Green < 0 || thresholds.Red > thresholds.Green || thresholds.Green > 100 {
+		return fmt.Errorf("availability thresholds must satisfy 0 <= red <= green <= 100")
+	}
+	return nil
+}
+
+func validateAvailabilityIntOption(raw string, minValue, maxValue int) error {
+	value, err := strconv.Atoi(strings.TrimSpace(raw))
+	if err != nil {
+		return err
+	}
+	if value < minValue || value > maxValue {
+		return fmt.Errorf("value must be between %d and %d", minValue, maxValue)
+	}
+	return nil
 }
 
 func UpdateOption(c *gin.Context) {
@@ -271,6 +299,50 @@ func UpdateOption(c *gin.Context) {
 		}
 	case "AutomaticRetryStatusCodes":
 		_, err = operation_setting.ParseHTTPStatusCodeRanges(option.Value.(string))
+		if err != nil {
+			c.JSON(http.StatusOK, gin.H{
+				"success": false,
+				"message": err.Error(),
+			})
+			return
+		}
+	case "availability.thresholds":
+		err = validateAvailabilityThresholds(option.Value.(string))
+		if err != nil {
+			c.JSON(http.StatusOK, gin.H{
+				"success": false,
+				"message": err.Error(),
+			})
+			return
+		}
+	case "availability.count_status":
+		_, err = operation_setting.ParseHTTPStatusCodeRanges(option.Value.(string))
+		if err != nil {
+			c.JSON(http.StatusOK, gin.H{
+				"success": false,
+				"message": err.Error(),
+			})
+			return
+		}
+	case "availability.exclude_keywords":
+		if len(option.Value.(string)) > 4096 {
+			c.JSON(http.StatusOK, gin.H{
+				"success": false,
+				"message": "availability.exclude_keywords length must be <= 4096 bytes",
+			})
+			return
+		}
+	case "availability.flush_seconds":
+		err = validateAvailabilityIntOption(option.Value.(string), 5, 3600)
+		if err != nil {
+			c.JSON(http.StatusOK, gin.H{
+				"success": false,
+				"message": err.Error(),
+			})
+			return
+		}
+	case "availability.window_seconds":
+		err = validateAvailabilityIntOption(option.Value.(string), 60, 2592000)
 		if err != nil {
 			c.JSON(http.StatusOK, gin.H{
 				"success": false,
