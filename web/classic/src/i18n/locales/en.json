@@ -3844,6 +3844,18 @@
     "tenant_admin": "Tenant admin",
     "reseller_l1": "Reseller L1",
     "reseller_l2": "Reseller L2",
+    "可用性": "Availability",
+    "可用性设置": "Availability Settings",
+    "可用性阈值（绿色，%）": "Availability Threshold (Green, %)",
+    "可用性阈值（红色，%）": "Availability Threshold (Red, %)",
+    "计入失败的状态码（如 500-599,429）": "Status Codes Counted as Failure (e.g. 500-599,429)",
+    "排除分组关键词（逗号分隔，支持中文）": "Excluded Group Keywords (comma-separated, supports Chinese)",
+    "刷新间隔（秒）": "Refresh Interval (seconds)",
+    "统计窗口（秒）": "Statistics Window (seconds)",
+    "阈值无效：0 ≤ 红色 ≤ 绿色 ≤ 100": "Invalid thresholds: 0 ≤ red ≤ green ≤ 100",
+    "刷新间隔必须在 5 到 3600 秒之间": "Refresh interval must be between 5 and 3600 seconds",
+    "统计窗口必须在 60 到 2592000 秒之间": "Statistics window must be between 60 and 2592000 seconds",
+    "保存可用性设置": "Save Availability Settings",
     "unassigned": "Unassigned"
   }
 }
